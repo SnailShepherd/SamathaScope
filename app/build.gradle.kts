@@ -1,7 +1,6 @@
-plugins {
+﻿plugins {
   id("com.android.application")
   id("org.jetbrains.kotlin.android")
-  // Kotlin 2.0+ uses the Compose compiler Gradle plugin.
   id("org.jetbrains.kotlin.plugin.compose")
 }
 
@@ -13,28 +12,29 @@ android {
     applicationId = "com.mordin.samathascope"
     minSdk = 26
     targetSdk = 35
-    versionCode = 1
-    versionName = "0.1"
+    versionCode = 2
+    versionName = "0.2"
+
+    testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
-  buildFeatures { compose = true }
+  buildFeatures {
+    compose = true
+  }
 
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_17
     targetCompatibility = JavaVersion.VERSION_17
   }
 
-
-kotlin {
-  compilerOptions {
-    jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+  kotlin {
+    compilerOptions {
+      jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
   }
 }
 
-}
-
 dependencies {
-  // Compose BOM keeps all Compose artifacts in sync.
   val composeBom = platform("androidx.compose:compose-bom:2026.02.01")
   implementation(composeBom)
   androidTestImplementation(composeBom)
@@ -49,4 +49,15 @@ dependencies {
   implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
 
   implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+
+  testImplementation("junit:junit:4.13.2")
+  testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
+  testImplementation("com.google.truth:truth:1.4.4")
+
+  androidTestImplementation("androidx.test.ext:junit:1.3.0")
+  androidTestImplementation("androidx.test:core-ktx:1.7.0")
+  androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
+  androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+
+  debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

@@ -16,27 +16,20 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.sqrt
 
-/**
- * Main app state + orchestration.
- *
- * Responsibilities:
- * - list paired Bluetooth devices (MindWave Mobile 2)
- * - connect / disconnect
- * - parse ThinkGear packets and feed raw samples into the processing pipeline
- * - manage session lifecycle: calibration → running → pause/stop
- * - push live values into UiState
- * - drive the audio engine (white noise + crackle overlay)
- *
- * This is intentionally a single ViewModel for v0.1.
- * Splitting into separate layers (Bluetooth, DSP, UI state) can happen later if it becomes painful.
- */
 class MainViewModel(app: Application) : AndroidViewModel(app) {
 
-  private val _ui = MutableStateFlow(UiState())
+  private val _ui = MutableStateFlow(
+    UiState(
+      plotSettings = createPlotSettingsStore(app.applicationContext).load()
+    )
+  )
   val ui: StateFlow<UiState> = _ui
 
   private val ctx = app.applicationContext
+  private val plotSettingsStore = createPlotSettingsStore(ctx)
 
   private val btAdapter: BluetoothAdapter? by lazy {
     val mgr = ctx.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
@@ -45,43 +38,43 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   private var client: BluetoothMindWaveClient? = null
 
-  // DSP + scoring
-  private val eegProcessor = EegProcessor(sampleRateHz = 512)
+  private val rawSampleRateHz = 512
+  private val eegProcessor = EegProcessor(sampleRateHz = rawSampleRateHz)
   private val calibration = CalibrationManager(calibrationSeconds = 60)
   private val scorer = ScoreModel()
+  private val metricHistory = MetricHistory(maxSeconds = 600, pointsPerSecond = 4)
 
-  // History for metric plots (4 Hz update, 60 sec window by default)
-  private val metricHistory = MetricHistory(maxSeconds = 60, pointsPerSecond = 4)
-
-  // Session stats (simple, to mimic EEG Meditation app)
-  private var statsSumS = 0f
+  private var statsSumSamatha = 0f
   private var statsCount = 0
-  private var timeSge80Ms = 0L
+  private var timeSamathaOver80Ms = 0L
   private var lastFeatureTsMs = 0L
 
-  // Session timing
   private var sessionStartMs: Long = 0L
   private var pausedAtMs: Long = 0L
   private var pausedAccumMs: Long = 0L
 
   private var sessionJob: Job? = null
 
-  // Audio + recorder
   private var audio: NoiseAudioEngine? = null
   private var recorder: SessionRecorder? = null
 
-  // For stream rate / stalls
   private var lastSampleAtMs: Long = 0
   private var rawCountThisSecond: Int = 0
   private var lastRateTickMs: Long = 0
   private var rawPreviewDecim: Int = 0
 
+  private var lastGameUpdateMs: Long = 0L
+  private var calibrationRawCount = 0
+  private var calibrationRawMean = 0.0
+  private var calibrationRawM2 = 0.0
+
   init {
-    // Android 11 and below: no runtime Bluetooth permission required for bonded device access.
     if (Build.VERSION.SDK_INT < 31) {
       _ui.update { it.copy(btPermissionGranted = true) }
       refreshBondedDevices()
     }
+    refreshSelectedPlotSeries()
+    refreshRawPreview()
   }
 
   fun onPermissionsResult(result: Map<String, Boolean>) {
@@ -106,6 +99,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   fun selectDevice(mac: String) {
     _ui.update { it.copy(selectedDeviceMac = mac) }
+  }
+
+  fun selectTab(tab: AppTab) {
+    _ui.update { it.copy(selectedTab = tab) }
+  }
+
+  fun setSettingsPanelVisible(visible: Boolean) {
+    _ui.update { it.copy(settingsPanelVisible = visible) }
   }
 
   fun connect() {
@@ -143,28 +144,40 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     calibration.reset()
     scorer.reset()
     metricHistory.reset()
+    resetRawCalibrationStats()
 
-    // Reset stats
-    statsSumS = 0f
+    statsSumSamatha = 0f
     statsCount = 0
-    timeSge80Ms = 0L
+    timeSamathaOver80Ms = 0L
     lastFeatureTsMs = 0L
+    lastGameUpdateMs = 0L
 
     sessionStartMs = System.currentTimeMillis()
     pausedAtMs = 0L
     pausedAccumMs = 0L
 
-    // Recording (optional)
+    if (!_ui.value.plotSettings.getValue(PlotType.RAW).isUserLocked) {
+      val (yMin, yMax) = PlotMath.defaultRawRange()
+      updatePlotSettings(
+        type = PlotType.RAW,
+        newSettings = _ui.value.plotSettings.getValue(PlotType.RAW).copy(yMin = yMin, yMax = yMax, isUserLocked = false),
+        persist = true,
+        refresh = false
+      )
+    }
+
     if (_ui.value.recordingEnabled) {
-      recorder = SessionRecorder(ctx).apply { start(sampleRateHz = 512) }
+      recorder = SessionRecorder(ctx).apply { start(sampleRateHz = rawSampleRateHz) }
       _ui.update { it.copy(lastRecordingPath = recorder?.sessionDir?.absolutePath) }
     } else {
       recorder = null
       _ui.update { it.copy(lastRecordingPath = null) }
     }
 
-    // Audio engine (start muted; unmute after calibration)
-    audio = NoiseAudioEngine().apply { start(); setMuted(true) }
+    audio = NoiseAudioEngine().apply {
+      start()
+      setMuted(true)
+    }
 
     _ui.update {
       it.copy(
@@ -174,11 +187,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         calibrationRemainingSec = calibration.calibrationSeconds,
         sessionElapsedSec = 0,
         audioRunning = true,
-        audioMuted = true
+        audioMuted = true,
+        plotHistory = emptyList(),
       )
     }
 
-    // Session tick: update countdown + elapsed time.
+    refreshRawPreview()
+    refreshSelectedPlotSeries()
+
     sessionJob = viewModelScope.launch(Dispatchers.Default) {
       while (_ui.value.sessionRunning) {
         val now = System.currentTimeMillis()
@@ -196,9 +212,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
         if (calibration.isDone() && _ui.value.calibrating) {
           scorer.setCalibration(calibration.buildCalibration())
+          applyCalibratedRawRangeIfNeeded()
           _ui.update { it.copy(calibrating = false) }
 
-          // Fade in feedback now that we have baseline percentiles.
           audio?.beginFadeIn()
           audio?.setMuted(false)
           _ui.update { it.copy(audioMuted = false) }
@@ -243,39 +259,107 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     } else {
       pausedAccumMs += (now - pausedAtMs).coerceAtLeast(0)
       pausedAtMs = 0L
-      // If calibration is still happening, stay muted.
       val shouldUnmute = !_ui.value.calibrating
       audio?.setMuted(!shouldUnmute)
       _ui.update { it.copy(sessionPaused = false, audioMuted = !shouldUnmute) }
     }
   }
 
-  fun setInvertReward(v: Boolean) = _ui.update { it.copy(invertReward = v) }
-  fun setArtefactsReduceScore(v: Boolean) = _ui.update { it.copy(artefactsReduceScore = v) }
-  fun setCrackleEnabled(v: Boolean) = _ui.update { it.copy(crackleEnabled = v) }
-  fun setGamma(v: Float) = _ui.update { it.copy(gamma = v) }
-  fun setGMinDb(v: Int) = _ui.update { it.copy(gMinDb = minOf(v, _ui.value.gMaxDb - 1)) }
-  fun setGMaxDb(v: Int) = _ui.update { it.copy(gMaxDb = maxOf(v, _ui.value.gMinDb + 1)) }
-  fun setCrackleIntensity(v: Float) = _ui.update { it.copy(crackleIntensity = v) }
-  fun setRecordingEnabled(v: Boolean) = _ui.update { it.copy(recordingEnabled = v) }
+  fun setInvertReward(value: Boolean) = _ui.update { it.copy(invertReward = value) }
 
-  fun setFeedbackMetric(v: PlotType) {
-    // RAW is not a meaningful feedback source; ignore.
-    if (v == PlotType.RAW) return
-    _ui.update { it.copy(feedbackMetric = v) }
+  fun setArtefactsReduceScore(value: Boolean) = _ui.update { it.copy(artefactsReduceScore = value) }
+
+  fun setCrackleEnabled(value: Boolean) = _ui.update { it.copy(crackleEnabled = value) }
+
+  fun setGamma(value: Float) = _ui.update { it.copy(gamma = value) }
+
+  fun setGMinDb(value: Int) = _ui.update { it.copy(gMinDb = min(value, _ui.value.gMaxDb - 1)) }
+
+  fun setGMaxDb(value: Int) = _ui.update { it.copy(gMaxDb = max(value, _ui.value.gMinDb + 1)) }
+
+  fun setCrackleIntensity(value: Float) = _ui.update { it.copy(crackleIntensity = value) }
+
+  fun setRecordingEnabled(value: Boolean) = _ui.update { it.copy(recordingEnabled = value) }
+
+  fun setFeedbackMetric(value: PlotType) {
+    if (value == PlotType.RAW) return
+    _ui.update { it.copy(feedbackMetric = value) }
   }
 
-  fun setPlotType(v: PlotType) {
-    _ui.update { it.copy(plotType = v) }
+  fun setGameMetric(value: PlotType) {
+    if (value == PlotType.RAW) return
+    _ui.update { state ->
+      state.copy(
+        gameState = state.gameState.copy(metric = value)
+      )
+    }
   }
 
-  /**
-   * Simple audio sanity-check:
-   * plays a short beep on the MUSIC stream.
-   *
-   * This is intentionally separate from the white-noise engine so that when audio is “silent”
-   * we can distinguish “engine bug” from “device volume muted”.
-   */
+  fun setPlotType(value: PlotType) {
+    _ui.update { it.copy(plotType = value) }
+    if (value == PlotType.RAW) {
+      refreshRawPreview()
+    }
+    refreshSelectedPlotSeries()
+  }
+
+  fun setPlotWindowSeconds(type: PlotType, seconds: Int) {
+    val base = _ui.value.plotSettings.getValue(type)
+    val normalized = when (type) {
+      PlotType.RAW -> seconds.coerceIn(3, 20)
+      else -> seconds.coerceIn(60, 600)
+    }
+    updatePlotSettings(
+      type = type,
+      newSettings = base.copy(windowSeconds = normalized),
+      persist = true,
+      refresh = true,
+    )
+  }
+
+  fun setPlotYMin(type: PlotType, yMin: Float) {
+    val base = _ui.value.plotSettings.getValue(type)
+    val lowerBound = when (type) {
+      PlotType.RAW -> -4000f
+      else -> 0f
+    }
+    val upperBound = when (type) {
+      PlotType.RAW -> base.yMax - 50f
+      else -> base.yMax - 1f
+    }
+    val clamped = yMin.coerceIn(lowerBound, upperBound)
+    updatePlotSettings(
+      type = type,
+      newSettings = base.copy(yMin = clamped, isUserLocked = true),
+      persist = true,
+      refresh = true,
+    )
+  }
+
+  fun setPlotYMax(type: PlotType, yMax: Float) {
+    val base = _ui.value.plotSettings.getValue(type)
+    val lowerBound = when (type) {
+      PlotType.RAW -> base.yMin + 50f
+      else -> base.yMin + 1f
+    }
+    val upperBound = when (type) {
+      PlotType.RAW -> 4000f
+      else -> 100f
+    }
+    val clamped = yMax.coerceIn(lowerBound, upperBound)
+    updatePlotSettings(
+      type = type,
+      newSettings = base.copy(yMax = clamped, isUserLocked = true),
+      persist = true,
+      refresh = true,
+    )
+  }
+
+  fun resetPlotSettings(type: PlotType) {
+    val defaults = defaultPlotSettings().getValue(type)
+    updatePlotSettings(type = type, newSettings = defaults, persist = true, refresh = true)
+  }
+
   fun testBeep() {
     viewModelScope.launch(Dispatchers.Default) {
       try {
@@ -287,17 +371,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
           tg.release()
         }
       } catch (_: Throwable) {
-        // If this fails, the device audio stack is probably muted or restricted.
       }
     }
   }
 
-  private fun handleThinkGearData(d: ThinkGearData) {
-    when (d) {
-      is ThinkGearData.PoorSignal -> _ui.update { it.copy(poorSignal = d.value) }
-      is ThinkGearData.Attention -> _ui.update { it.copy(attention = d.value) }
-      is ThinkGearData.Meditation -> _ui.update { it.copy(meditation = d.value) }
-      is ThinkGearData.RawSample -> handleRawSample(d.value)
+  private fun handleThinkGearData(data: ThinkGearData) {
+    when (data) {
+      is ThinkGearData.PoorSignal -> _ui.update { it.copy(poorSignal = data.value) }
+      is ThinkGearData.Attention -> _ui.update { it.copy(attention = data.value) }
+      is ThinkGearData.Meditation -> _ui.update { it.copy(meditation = data.value) }
+      is ThinkGearData.RawSample -> handleRawSample(data.value)
       else -> Unit
     }
   }
@@ -305,90 +388,75 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   private fun handleRawSample(raw: Int) {
     val now = System.currentTimeMillis()
 
-    // Stream stall estimate: time since previous sample.
     val prev = lastSampleAtMs
     lastSampleAtMs = now
 
-    // samples/s estimate
     if (lastRateTickMs == 0L) lastRateTickMs = now
     rawCountThisSecond++
     if (now - lastRateTickMs >= 1000) {
-      val sps = rawCountThisSecond * 1000f / max(1L, (now - lastRateTickMs)).toFloat()
+      val samplesPerSecond = rawCountThisSecond * 1000f / max(1L, (now - lastRateTickMs)).toFloat()
       rawCountThisSecond = 0
       lastRateTickMs = now
-      _ui.update { it.copy(samplesPerSecond = sps) }
+      _ui.update { it.copy(samplesPerSecond = samplesPerSecond) }
     }
 
     recorder?.appendRaw(raw.toShort())
 
-    // Push into DSP pipeline
+    if (_ui.value.sessionRunning && _ui.value.calibrating) addCalibrationRaw(raw)
+
     val features = eegProcessor.pushRaw(raw, now)
 
-    // Update waveform preview more frequently than feature extraction (otherwise it looks “slow and drunk”).
     rawPreviewDecim++
-    if (rawPreviewDecim % 32 == 0) {
-      _ui.update { it.copy(rawPreview = eegProcessor.rawPreview()) }
+    if (rawPreviewDecim % 32 == 0 && _ui.value.plotType == PlotType.RAW) {
+      refreshRawPreview()
     }
 
     if (features == null) return
 
-    val poor = _ui.value.poorSignal
+    val poorSignal = _ui.value.poorSignal
     val stallMs = if (prev == 0L) 0L else (now - prev).coerceAtLeast(0)
-    val artefacts = scorer.artefacts(poorSignal = poor, features = features, stallMs = stallMs)
+    val artefacts = scorer.artefacts(poorSignal = poorSignal, features = features, stallMs = stallMs)
 
-    // During calibration we collect baseline distributions.
     if (_ui.value.sessionRunning && _ui.value.calibrating) {
       calibration.addSample(rai = features.rai, artefactA = artefacts.totalA)
     }
 
-    // Core score S derived from raw EEG (RAI + artefact penalty).
-    val scoreS = scorer.scoreS(
+    val samathaScore = scorer.scoreS(
       rai = features.rai,
       artefactA = artefacts.totalA,
       artefactsReduceScore = _ui.value.artefactsReduceScore
     )
 
-    // Session stats
     if (_ui.value.sessionRunning && !_ui.value.sessionPaused) {
-      statsSumS += scoreS
+      statsSumSamatha += samathaScore
       statsCount++
 
       if (lastFeatureTsMs != 0L) {
         val dt = (now - lastFeatureTsMs).coerceAtLeast(0)
-        if (scoreS >= 0.80f) timeSge80Ms += dt
+        if (samathaScore >= 0.80f) timeSamathaOver80Ms += dt
       }
       lastFeatureTsMs = now
     }
 
-    // Store metric history for plotting (only 60s window; keeps UI cheap).
+    val relaxedAlertness = scorer.normaliseRai(features.rai)
+
     metricHistory.add(
-      scoreS = scoreS,
-      scoreA = artefacts.totalA,
-      rai = scorer.normaliseRai(features.rai),
-      meditation = _ui.value.meditation,
-      attention = _ui.value.attention
+      samathaScore = samathaScore,
+      artefactScore = artefacts.totalA,
+      relaxedAlertnessIndex = relaxedAlertness,
+      meditationValue = _ui.value.meditation,
+      attentionValue = _ui.value.attention
     )
 
-    val plotSeries = when (_ui.value.plotType) {
-      PlotType.RAW -> emptyList()
-      PlotType.SAMATHA_S -> metricHistory.seriesS()
-      PlotType.ARTEFACT_A -> metricHistory.seriesA()
-      PlotType.RAI -> metricHistory.seriesRai()
-      PlotType.ESENSE_MEDITATION -> metricHistory.seriesMeditation()
-      PlotType.ESENSE_ATTENTION -> metricHistory.seriesAttention()
-    }
+    val feedback = metricValueForType(
+      type = _ui.value.feedbackMetric,
+      samathaScore = samathaScore,
+      artefactScore = artefacts.totalA,
+      relaxedAlertnessIndex = relaxedAlertness,
+      meditation = _ui.value.meditation,
+      attention = _ui.value.attention,
+    )
 
-    // Choose feedback value based on UI selection.
-    val feedback = when (_ui.value.feedbackMetric) {
-      PlotType.SAMATHA_S -> scoreS
-      PlotType.ARTEFACT_A -> (1f - artefacts.totalA).coerceIn(0f, 1f) // “better” = fewer artefacts
-      PlotType.RAI -> scorer.normaliseRai(features.rai)
-      PlotType.ESENSE_MEDITATION -> (_ui.value.meditation / 100f).coerceIn(0f, 1f)
-      PlotType.ESENSE_ATTENTION -> (_ui.value.attention / 100f).coerceIn(0f, 1f)
-      PlotType.RAW -> scoreS
-    }
-
-    // Drive audio if session is running, not paused, and calibration finished.
     val shouldAudioRun = _ui.value.sessionRunning && !_ui.value.sessionPaused && !_ui.value.calibrating
     if (shouldAudioRun) {
       audio?.update(
@@ -406,13 +474,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       audio?.setMuted(true)
     }
 
-    // Record features
     recorder?.appendFeatures(
       timestampMs = now,
       rai = features.rai,
-      scoreS = scoreS,
+      scoreS = samathaScore,
       scoreA = artefacts.totalA,
-      poorSignal = poor,
+      poorSignal = poorSignal,
       aContact = artefacts.contact,
       aLine = artefacts.line,
       aEmg = artefacts.emg,
@@ -420,30 +487,164 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       aStall = artefacts.stall,
     )
 
-    val avgS = if (statsCount == 0) 0f else (statsSumS / statsCount.toFloat())
-    val sge80sec = (timeSge80Ms / 1000L).toInt()
+    val avgSamatha = if (statsCount == 0) 0f else (statsSumSamatha / statsCount.toFloat())
+    val over80Seconds = (timeSamathaOver80Ms / 1000L).toInt()
 
-    // Push UI update
+    val gameMetricValue = metricValueForType(
+      type = _ui.value.gameState.metric,
+      samathaScore = samathaScore,
+      artefactScore = artefacts.totalA,
+      relaxedAlertnessIndex = relaxedAlertness,
+      meditation = _ui.value.meditation,
+      attention = _ui.value.attention,
+    )
+
+    val dtSeconds = if (lastGameUpdateMs == 0L) {
+      0.25f
+    } else {
+      ((now - lastGameUpdateMs).toFloat() / 1000f).coerceIn(0.016f, 0.25f)
+    }
+    lastGameUpdateMs = now
+
+    val nextLevitation = GamePhysics.step(
+      state = LevitationState(
+        altitude = _ui.value.gameState.altitude,
+        velocity = _ui.value.gameState.velocity,
+      ),
+      target = GamePhysics.metricToTargetHeight(gameMetricValue),
+      dtSeconds = dtSeconds,
+    )
+
     _ui.update {
       it.copy(
-        rai = features.rai,
-        scoreS = scoreS,
-        scoreA = artefacts.totalA,
-        avgS = avgS,
-        timeSge80Sec = sge80sec,
+        relaxedAlertnessIndex = relaxedAlertness,
+        samathaScore = samathaScore,
+        artefactScore = artefacts.totalA,
+        avgSamathaScore = avgSamatha,
+        timeSamathaOver80Seconds = over80Seconds,
 
-        aContact = artefacts.contact,
-        aLine = artefacts.line,
-        aEmg = artefacts.emg,
-        aBlink = artefacts.blink,
-        aStall = artefacts.stall,
+        artefactContact = artefacts.contact,
+        artefactLine = artefacts.line,
+        artefactEmg = artefacts.emg,
+        artefactBlink = artefacts.blink,
+        artefactStall = artefacts.stall,
         streamStallMs = artefacts.stallMs,
 
-        plotHistory = plotSeries,
-        audioRunning = (audio != null),
+        audioRunning = audio != null,
         audioMuted = !shouldAudioRun,
         audioBaseDb = audio?.debugBaseDb ?: it.audioBaseDb,
+
+        gameState = it.gameState.copy(
+          altitude = nextLevitation.altitude,
+          velocity = nextLevitation.velocity,
+        ),
+        gameHudState = it.gameHudState.copy(
+          metricValuePercent = (gameMetricValue * 100f).toInt().coerceIn(0, 100),
+          artefactPercent = (artefacts.totalA * 100f).toInt().coerceIn(0, 100),
+          poorSignal = poorSignal,
+          elapsedSeconds = it.sessionElapsedSec,
+          batteryPercent = it.batteryPercent,
+        )
       )
     }
+
+    refreshSelectedPlotSeries()
+  }
+
+  private fun metricValueForType(
+    type: PlotType,
+    samathaScore: Float,
+    artefactScore: Float,
+    relaxedAlertnessIndex: Float,
+    meditation: Int,
+    attention: Int,
+  ): Float {
+    return when (type) {
+      PlotType.SAMATHA_SCORE -> samathaScore
+      PlotType.ARTEFACT_SCORE -> (1f - artefactScore).coerceIn(0f, 1f)
+      PlotType.RELAXED_ALERTNESS_INDEX -> relaxedAlertnessIndex.coerceIn(0f, 1f)
+      PlotType.ESENSE_MEDITATION -> (meditation / 100f).coerceIn(0f, 1f)
+      PlotType.ESENSE_ATTENTION -> (attention / 100f).coerceIn(0f, 1f)
+      PlotType.RAW -> samathaScore
+    }
+  }
+
+  private fun updatePlotSettings(
+    type: PlotType,
+    newSettings: PlotSettings,
+    persist: Boolean,
+    refresh: Boolean,
+  ) {
+    _ui.update { state ->
+      state.copy(
+        plotSettings = state.plotSettings + (type to newSettings)
+      )
+    }
+    if (persist) {
+      plotSettingsStore.save(type, newSettings)
+    }
+    if (refresh) {
+      if (type == PlotType.RAW) {
+        refreshRawPreview()
+      }
+      refreshSelectedPlotSeries()
+    }
+  }
+
+  private fun refreshRawPreview() {
+    val setting = _ui.value.plotSettings.getValue(PlotType.RAW)
+    val sampleCount = (setting.windowSeconds * rawSampleRateHz).coerceIn(64, rawSampleRateHz * 20)
+    val values = eegProcessor.rawPreview(sampleCount)
+    _ui.update { it.copy(rawPreview = values) }
+  }
+
+  private fun refreshSelectedPlotSeries() {
+    val plotType = _ui.value.plotType
+    if (plotType == PlotType.RAW) {
+      _ui.update { it.copy(plotHistory = emptyList()) }
+      return
+    }
+    val windowSeconds = _ui.value.plotSettings.getValue(plotType).windowSeconds
+    val series = metricHistory.series(plotType, windowSeconds)
+    _ui.update { it.copy(plotHistory = convertSeriesForDisplay(plotType, series)) }
+  }
+
+  private fun convertSeriesForDisplay(type: PlotType, values: List<Float>): List<Float> {
+    return when (type) {
+      PlotType.SAMATHA_SCORE,
+      PlotType.ARTEFACT_SCORE,
+      PlotType.RELAXED_ALERTNESS_INDEX -> values.map { (it * 100f).coerceIn(0f, 100f) }
+      PlotType.ESENSE_MEDITATION,
+      PlotType.ESENSE_ATTENTION -> values.map { it.coerceIn(0f, 100f) }
+      PlotType.RAW -> values
+    }
+  }
+
+  private fun resetRawCalibrationStats() {
+    calibrationRawCount = 0
+    calibrationRawMean = 0.0
+    calibrationRawM2 = 0.0
+  }
+
+  private fun addCalibrationRaw(sample: Int) {
+    calibrationRawCount++
+    val delta = sample - calibrationRawMean
+    calibrationRawMean += delta / calibrationRawCount.toDouble()
+    val delta2 = sample - calibrationRawMean
+    calibrationRawM2 += delta * delta2
+  }
+
+  private fun applyCalibratedRawRangeIfNeeded() {
+    val current = _ui.value.plotSettings.getValue(PlotType.RAW)
+    if (current.isUserLocked) return
+    val variance = if (calibrationRawCount > 1) calibrationRawM2 / (calibrationRawCount - 1) else 0.0
+    val sd = sqrt(variance.coerceAtLeast(1.0))
+    val (yMin, yMax) = PlotMath.calibratedRawRangeFromSd(sd)
+    updatePlotSettings(
+      type = PlotType.RAW,
+      newSettings = current.copy(yMin = yMin, yMax = yMax, isUserLocked = false),
+      persist = true,
+      refresh = true,
+    )
   }
 }

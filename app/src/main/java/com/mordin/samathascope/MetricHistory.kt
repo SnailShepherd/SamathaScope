@@ -1,47 +1,54 @@
-package com.mordin.samathascope
+﻿package com.mordin.samathascope
 
-import kotlin.math.roundToInt
-
-/**
- * Lightweight fixed-length time series storage for live plots.
- *
- * v0.1 goal: show a stable, usable chart without allocating tons of objects or keeping hours of data in RAM.
- *
- * We store points at a fixed rate (pointsPerSecond) and keep maxSeconds of history.
- * The UI receives plain Float lists for drawing.
- */
 class MetricHistory(
   private val maxSeconds: Int,
   private val pointsPerSecond: Int
 ) {
   private val capacity = (maxSeconds * pointsPerSecond).coerceAtLeast(8)
 
-  private val s = ArrayList<Float>(capacity)
-  private val a = ArrayList<Float>(capacity)
-  private val rai = ArrayList<Float>(capacity)
-  private val med = ArrayList<Float>(capacity)
-  private val att = ArrayList<Float>(capacity)
+  private val samatha = ArrayList<Float>(capacity)
+  private val artefact = ArrayList<Float>(capacity)
+  private val relaxedAlertness = ArrayList<Float>(capacity)
+  private val meditation = ArrayList<Float>(capacity)
+  private val attention = ArrayList<Float>(capacity)
 
   fun reset() {
-    s.clear(); a.clear(); rai.clear(); med.clear(); att.clear()
+    samatha.clear()
+    artefact.clear()
+    relaxedAlertness.clear()
+    meditation.clear()
+    attention.clear()
   }
 
-  fun add(scoreS: Float, scoreA: Float, rai: Float, meditation: Int, attention: Int) {
-    push(s, scoreS)
-    push(a, scoreA)
-    push(this.rai, rai)
-    push(med, meditation.toFloat())
-    push(att, attention.toFloat())
+  fun add(
+    samathaScore: Float,
+    artefactScore: Float,
+    relaxedAlertnessIndex: Float,
+    meditationValue: Int,
+    attentionValue: Int,
+  ) {
+    push(samatha, samathaScore)
+    push(artefact, artefactScore)
+    push(relaxedAlertness, relaxedAlertnessIndex)
+    push(meditation, meditationValue.toFloat())
+    push(attention, attentionValue.toFloat())
   }
 
-  fun seriesS(): List<Float> = s.toList()
-  fun seriesA(): List<Float> = a.toList()
-  fun seriesRai(): List<Float> = rai.toList()
-  fun seriesMeditation(): List<Float> = med.toList()
-  fun seriesAttention(): List<Float> = att.toList()
+  fun series(type: PlotType, windowSeconds: Int): List<Float> {
+    val maxPoints = (windowSeconds * pointsPerSecond).coerceAtLeast(2)
+    val source = when (type) {
+      PlotType.RAW -> emptyList()
+      PlotType.SAMATHA_SCORE -> samatha
+      PlotType.ARTEFACT_SCORE -> artefact
+      PlotType.RELAXED_ALERTNESS_INDEX -> relaxedAlertness
+      PlotType.ESENSE_MEDITATION -> meditation
+      PlotType.ESENSE_ATTENTION -> attention
+    }
+    return PlotMath.takeFixedWindow(source, maxPoints)
+  }
 
-  private fun push(list: ArrayList<Float>, v: Float) {
+  private fun push(list: ArrayList<Float>, value: Float) {
     if (list.size >= capacity) list.removeAt(0)
-    list.add(v)
+    list.add(value)
   }
 }

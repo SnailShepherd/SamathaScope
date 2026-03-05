@@ -1,9 +1,8 @@
-package com.mordin.samathascope
+﻿package com.mordin.samathascope
 
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.ln
-import kotlin.math.min
 import kotlin.math.sin
 import kotlin.math.sqrt
 
@@ -18,24 +17,18 @@ data class EegFeatures(
   val clipFrac: Float,
 )
 
-/**
- * Raw-first feature extraction using FFT band power on sliding windows.
- *
- * - sampleRate: MindWave Mobile 2 advertises 512 Hz sampling.
- * - window: 1024 samples (~2.0 s)
- * - hop: 128 samples (~0.25 s)  => 4 Hz updates
- */
 class EegProcessor(
   private val sampleRateHz: Int,
   private val windowSize: Int = 1024,
   private val hopSize: Int = 128,
+  rawPreviewSeconds: Int = 20,
 ) {
-  private val ring = IntArray(windowSize * 4) // ~8 seconds
+  private val ring = IntArray(windowSize * 4)
   private var ringPos = 0
   private var totalSamples = 0
   private var hopCounter = 0
 
-  private val previewSize = 512
+  private val previewSize = (sampleRateHz * rawPreviewSeconds).coerceAtLeast(sampleRateHz)
   private val preview = IntArray(previewSize)
   private var previewPos = 0
 
@@ -46,10 +39,11 @@ class EegProcessor(
     previewPos = 0
   }
 
-  fun rawPreview(): List<Int> {
-    val out = IntArray(previewSize)
-    val start = (previewPos - previewSize + previewSize) % previewSize
-    for (i in 0 until previewSize) {
+  fun rawPreview(maxSamples: Int): List<Int> {
+    val count = maxSamples.coerceIn(1, previewSize)
+    val out = IntArray(count)
+    val start = (previewPos - count + previewSize) % previewSize
+    for (i in 0 until count) {
       out[i] = preview[(start + i) % previewSize]
     }
     return out.toList()
@@ -68,7 +62,6 @@ class EegProcessor(
     if (hopCounter < hopSize) return null
     hopCounter = 0
 
-    // Extract last windowSize samples from ring (in order)
     val window = FloatArray(windowSize)
     val start = (ringPos - windowSize + ring.size) % ring.size
     for (i in 0 until windowSize) {
@@ -78,13 +71,11 @@ class EegProcessor(
   }
 
   private fun computeFeatures(x: FloatArray): EegFeatures {
-    // Hanning window
     for (i in x.indices) {
       val w = 0.5f - 0.5f * cos(2.0 * Math.PI * i / (x.size - 1)).toFloat()
       x[i] *= w
     }
 
-    // FFT (in-place into re/im)
     val re = x.copyOf()
     val im = FloatArray(x.size)
 
@@ -93,17 +84,17 @@ class EegProcessor(
     val n = x.size
     val df = sampleRateHz.toFloat() / n.toFloat()
 
-    fun bin(freq: Float): Int = (freq / df).toInt().coerceIn(0, n/2)
+    fun bin(freq: Float): Int = (freq / df).toInt().coerceIn(0, n / 2)
 
     fun bandPower(f1: Float, f2: Float): Float {
       val b1 = bin(f1)
       val b2 = bin(f2)
-      var s = 0.0f
+      var sum = 0.0f
       for (k in b1..b2) {
-        val p = re[k]*re[k] + im[k]*im[k]
-        s += p
+        val p = re[k] * re[k] + im[k] * im[k]
+        sum += p
       }
-      return s
+      return sum
     }
 
     val alpha = bandPower(8f, 12f)
@@ -115,15 +106,14 @@ class EegProcessor(
     val rai = ln((alpha + eps) / (hi + eps)).toFloat()
     val emgFrac = (hi / (total145 + eps)).coerceIn(0f, 1f)
 
-    // Blink/transient proxy: derivative outliers (very crude, but works as "movement indicator")
     var mean = 0f
-    for (i in 1 until x.size) mean += (x[i] - x[i-1])
+    for (i in 1 until x.size) mean += (x[i] - x[i - 1])
     mean /= (x.size - 1)
 
     var varD = 0f
     for (i in 1 until x.size) {
-      val d = (x[i] - x[i-1]) - mean
-      varD += d*d
+      val d = (x[i] - x[i - 1]) - mean
+      varD += d * d
     }
     varD /= (x.size - 1)
     val sd = sqrt(varD + eps)
@@ -131,12 +121,11 @@ class EegProcessor(
     var spikes = 0
     val thr = 6f * sd
     for (i in 1 until x.size) {
-      val d = abs((x[i] - x[i-1]) - mean)
+      val d = abs((x[i] - x[i - 1]) - mean)
       if (d > thr) spikes++
     }
-    val blinkScore = (spikes / 50f).coerceIn(0f, 1f) // heuristic scaling
+    val blinkScore = (spikes / 50f).coerceIn(0f, 1f)
 
-    // Clipping proxy (MindWave often sits around ±2048-ish, but we don't hardcode too tightly)
     var clips = 0
     for (v in x) if (abs(v) > 1900f) clips++
     val clipFrac = (clips.toFloat() / x.size.toFloat()).coerceIn(0f, 1f)
@@ -153,10 +142,6 @@ class EegProcessor(
     )
   }
 
-  /**
-   * Iterative radix-2 Cooley-Tukey FFT.
-   * - re/im length must be power of 2.
-   */
   private fun fftRadix2(re: FloatArray, im: FloatArray) {
     val n = re.size
     var j = 0
@@ -168,8 +153,12 @@ class EegProcessor(
       }
       j = j xor bit
       if (i < j) {
-        val tr = re[i]; re[i] = re[j]; re[j] = tr
-        val ti = im[i]; im[i] = im[j]; im[j] = ti
+        val tr = re[i]
+        re[i] = re[j]
+        re[j] = tr
+        val ti = im[i]
+        im[i] = im[j]
+        im[j] = ti
       }
     }
 
@@ -182,16 +171,16 @@ class EegProcessor(
       while (i < n) {
         var wRe = 1f
         var wIm = 0f
-        for (k in 0 until (len/2)) {
+        for (k in 0 until (len / 2)) {
           val uRe = re[i + k]
           val uIm = im[i + k]
-          val vRe = re[i + k + len/2] * wRe - im[i + k + len/2] * wIm
-          val vIm = re[i + k + len/2] * wIm + im[i + k + len/2] * wRe
+          val vRe = re[i + k + len / 2] * wRe - im[i + k + len / 2] * wIm
+          val vIm = re[i + k + len / 2] * wIm + im[i + k + len / 2] * wRe
 
           re[i + k] = uRe + vRe
           im[i + k] = uIm + vIm
-          re[i + k + len/2] = uRe - vRe
-          im[i + k + len/2] = uIm - vIm
+          re[i + k + len / 2] = uRe - vRe
+          im[i + k + len / 2] = uIm - vIm
 
           val nextWRe = wRe * wlenRe - wIm * wlenIm
           val nextWIm = wRe * wlenIm + wIm * wlenRe
