@@ -1,4 +1,6 @@
 plugins {
-  id("com.android.application") version "8.2.2" apply false
-  id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+  // Align with Android Studio / AGP 8.13.x toolchain.
+  id("com.android.application") version "8.13.2" apply false
+  id("org.jetbrains.kotlin.android") version "2.3.10" apply false
+  id("org.jetbrains.kotlin.plugin.compose") version "2.3.10" apply false
 }

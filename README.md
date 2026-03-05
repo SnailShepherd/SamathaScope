@@ -27,3 +27,9 @@ v0.1 only lists **bonded** devices (no scanning).
 - `raw.raw16le` (signed int16 LE)
 - `features.csv`
 - `meta.txt`
+
+
+Toolchain: AGP 8.13.2 / Gradle 8.13 / Kotlin 2.3.10 / Compose plugin.
+
+## SDK requirement
+This project compiles with **compileSdk 36**. Install `Android SDK Platform 36` in SDK Manager if Android Studio prompts.
