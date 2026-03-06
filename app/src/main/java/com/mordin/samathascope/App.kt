@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -780,11 +779,15 @@ private fun HudRow(label: String, value: String) {
 @Composable
 private fun LevitationScene(altitude: Float) {
   val clampedAltitude = altitude.coerceIn(0f, 1f)
+  val colorScheme = MaterialTheme.colorScheme
+  val outlineColor = colorScheme.outline
+  val primaryColor = colorScheme.primary
+
   Box(
     modifier = Modifier
       .fillMaxWidth()
       .height(240.dp)
-      .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(4.dp))
+      .border(1.dp, outlineColor, RoundedCornerShape(4.dp))
   ) {
     androidx.compose.foundation.Image(
       painter = androidx.compose.ui.res.painterResource(id = R.drawable.game_landscape_placeholder),
@@ -803,7 +806,7 @@ private fun LevitationScene(altitude: Float) {
 
       val horizonY = h * 0.65f
       drawLine(
-        color = MaterialTheme.colorScheme.outline,
+        color = outlineColor,
         start = Offset(0f, horizonY),
         end = Offset(w, horizonY),
         strokeWidth = 2f,
@@ -812,7 +815,7 @@ private fun LevitationScene(altitude: Float) {
       for (i in 1..4) {
         val y = h * i / 5f
         drawLine(
-          color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
+          color = outlineColor.copy(alpha = 0.35f),
           start = Offset(0f, y),
           end = Offset(w, y),
           strokeWidth = 1f,
@@ -821,7 +824,7 @@ private fun LevitationScene(altitude: Float) {
 
       val markerX = w * 0.12f
       drawLine(
-        color = MaterialTheme.colorScheme.outline,
+        color = outlineColor,
         start = Offset(markerX, 0f),
         end = Offset(markerX, h),
         strokeWidth = 2f,
@@ -832,12 +835,12 @@ private fun LevitationScene(altitude: Float) {
       val x = w * 0.5f
 
       drawCircle(
-        color = MaterialTheme.colorScheme.primary,
+        color = primaryColor,
         radius = balloonRadius,
         center = Offset(x, y),
       )
       drawLine(
-        color = MaterialTheme.colorScheme.primary,
+        color = primaryColor,
         start = Offset(x, y + balloonRadius),
         end = Offset(x, y + balloonRadius + h * 0.08f),
         strokeWidth = 2f,
@@ -1041,6 +1044,11 @@ private fun WaveformPlot(samples: List<Int>, yMin: Float, yMax: Float) {
   if (samples.size < 8) return
 
   val safeYMax = if (yMax <= yMin) yMin + 1f else yMax
+  val colorScheme = MaterialTheme.colorScheme
+  val surfaceColor = colorScheme.surface
+  val outlineColor = colorScheme.outline
+  val primaryColor = colorScheme.primary
+
   val centered = samples.map { it.toFloat().coerceIn(yMin, safeYMax) }
   val points = PlotMath.toPlotPoints(
     values = centered,
@@ -1054,8 +1062,8 @@ private fun WaveformPlot(samples: List<Int>, yMin: Float, yMax: Float) {
     modifier = Modifier
       .fillMaxWidth()
       .height(190.dp)
-      .background(MaterialTheme.colorScheme.surface)
-      .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(4.dp))
+      .background(surfaceColor)
+      .border(1.dp, outlineColor, RoundedCornerShape(4.dp))
       .padding(6.dp)
   ) {
     val w = size.width
@@ -1063,7 +1071,7 @@ private fun WaveformPlot(samples: List<Int>, yMin: Float, yMax: Float) {
     val zeroY = h - ((0f - yMin) / (safeYMax - yMin)) * h
 
     drawLine(
-      color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+      color = outlineColor.copy(alpha = 0.5f),
       start = Offset(0f, zeroY.coerceIn(0f, h)),
       end = Offset(w, zeroY.coerceIn(0f, h)),
       strokeWidth = 1f
@@ -1078,7 +1086,7 @@ private fun WaveformPlot(samples: List<Int>, yMin: Float, yMax: Float) {
 
     drawPath(
       path = path,
-      color = MaterialTheme.colorScheme.primary,
+      color = primaryColor,
       style = Stroke(width = 2f),
     )
   }
@@ -1089,14 +1097,19 @@ private fun MetricPlot(values: List<Float>, yMin: Float, yMax: Float) {
   if (values.size < 2) return
 
   val safeYMax = if (yMax <= yMin) yMin + 1f else yMax
+  val colorScheme = MaterialTheme.colorScheme
+  val surfaceColor = colorScheme.surface
+  val outlineColor = colorScheme.outline
+  val primaryColor = colorScheme.primary
+
   val points = PlotMath.toPlotPoints(values, yMin, safeYMax, width = 1f, height = 1f)
 
   Canvas(
     modifier = Modifier
       .fillMaxWidth()
       .height(200.dp)
-      .background(MaterialTheme.colorScheme.surface)
-      .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(4.dp))
+      .background(surfaceColor)
+      .border(1.dp, outlineColor, RoundedCornerShape(4.dp))
       .padding(6.dp)
   ) {
     val w = size.width
@@ -1105,7 +1118,7 @@ private fun MetricPlot(values: List<Float>, yMin: Float, yMax: Float) {
     for (i in 0..4) {
       val y = h * i / 4f
       drawLine(
-        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
+        color = outlineColor.copy(alpha = 0.35f),
         start = Offset(0f, y),
         end = Offset(w, y),
         strokeWidth = 1f,
@@ -1121,7 +1134,7 @@ private fun MetricPlot(values: List<Float>, yMin: Float, yMax: Float) {
 
     drawPath(
       path = path,
-      color = MaterialTheme.colorScheme.primary,
+      color = primaryColor,
       style = Stroke(width = 2.2f),
     )
   }
