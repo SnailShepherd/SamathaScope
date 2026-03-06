@@ -1,7 +1,7 @@
 {
     "logs": [
         {
-            "outputFile": "com.mordin.samathascope.app-mergeDebugResources-36:/values-zh-rHK/values-zh-rHK.xml",
+            "outputFile": "com.mordin.samathascope.app-mergeDebugResources-37:/values-zh-rHK/values-zh-rHK.xml",
             "map": [
                 {
                     "source": "C:\\Users\\ulidk\\.gradle\\caches\\8.13\\transforms\\1b4f7b4eecabd461e87fe661d32b9b3c\\transformed\\ui\\res\\values-zh-rHK\\values-zh-rHK.xml",

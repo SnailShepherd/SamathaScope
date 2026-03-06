@@ -6,13 +6,7 @@ data class PlotPoint(
 )
 
 object PlotMath {
-  fun takeFixedWindow(values: List<Float>, maxPoints: Int): List<Float> {
-    if (maxPoints <= 0) return emptyList()
-    if (values.size <= maxPoints) return values
-    return values.takeLast(maxPoints)
-  }
-
-  fun takeFixedWindow(values: List<Int>, maxPoints: Int): List<Int> {
+  fun <T> takeFixedWindow(values: List<T>, maxPoints: Int): List<T> {
     if (maxPoints <= 0) return emptyList()
     if (values.size <= maxPoints) return values
     return values.takeLast(maxPoints)

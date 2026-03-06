@@ -1,16 +1,16 @@
 -- Merging decision tree log ---
 manifest
-ADDED from C:\Users\ulidk\Downloads\mindwavemobile2\SamathaScope_v0.1.1_FINAL_patch2_compileSdk36\app\src\main\AndroidManifest.xml:1:1-25:12
-INJECTED from C:\Users\ulidk\Downloads\mindwavemobile2\SamathaScope_v0.1.1_FINAL_patch2_compileSdk36\app\src\main\AndroidManifest.xml:1:1-25:12
-INJECTED from C:\Users\ulidk\Downloads\mindwavemobile2\SamathaScope_v0.1.1_FINAL_patch2_compileSdk36\app\src\main\AndroidManifest.xml:1:1-25:12
-INJECTED from C:\Users\ulidk\Downloads\mindwavemobile2\SamathaScope_v0.1.1_FINAL_patch2_compileSdk36\app\src\main\AndroidManifest.xml:1:1-25:12
+ADDED from C:\Users\ulidk\Documents\GitHub\SamathaScope\app\src\main\AndroidManifest.xml:1:1-25:12
+INJECTED from C:\Users\ulidk\Documents\GitHub\SamathaScope\app\src\main\AndroidManifest.xml:1:1-25:12
+INJECTED from C:\Users\ulidk\Documents\GitHub\SamathaScope\app\src\main\AndroidManifest.xml:1:1-25:12
+INJECTED from C:\Users\ulidk\Documents\GitHub\SamathaScope\app\src\main\AndroidManifest.xml:1:1-25:12
 MERGED from [androidx.compose.material3:material3-android:1.4.0] C:\Users\ulidk\.gradle\caches\8.13\transforms\7fb8a5f576fd05c67d9d81b5a6312f33\transformed\material3\AndroidManifest.xml:17:1-22:12
 MERGED from [androidx.compose.material:material-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\92e494421b67e1f7cbf068071f3dec60\transformed\material\AndroidManifest.xml:2:1-7:12
-MERGED from [androidx.compose.animation:animation-core-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\e177bc467ef2e1f14b23626622024cf5\transformed\animation-core\AndroidManifest.xml:2:1-7:12
 MERGED from [androidx.compose.material:material-ripple-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\0218fffe8c86bce5ef23ac0da4420c2d\transformed\material-ripple\AndroidManifest.xml:2:1-7:12
+MERGED from [androidx.compose.foundation:foundation-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\43d3fb5fdac3563226ed6408c3c63727\transformed\foundation\AndroidManifest.xml:2:1-7:12
 MERGED from [androidx.compose.animation:animation-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\17c2e0fc97a02f9a8d742a25fe1fc85f\transformed\animation\AndroidManifest.xml:2:1-7:12
 MERGED from [androidx.compose.foundation:foundation-layout-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\824e9a2cdcd485a4c6138cc42f681c1e\transformed\foundation-layout\AndroidManifest.xml:2:1-7:12
-MERGED from [androidx.compose.foundation:foundation-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\43d3fb5fdac3563226ed6408c3c63727\transformed\foundation\AndroidManifest.xml:2:1-7:12
+MERGED from [androidx.compose.animation:animation-core-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\e177bc467ef2e1f14b23626622024cf5\transformed\animation-core\AndroidManifest.xml:2:1-7:12
 MERGED from [androidx.compose.ui:ui-tooling-data-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\ca0d031a1c9b873388c2d12d4aececfd\transformed\ui-tooling-data\AndroidManifest.xml:2:1-7:12
 MERGED from [androidx.compose.ui:ui-unit-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\412b769d32a8b7922b16a395d16b5f26\transformed\ui-unit\AndroidManifest.xml:2:1-7:12
 MERGED from [androidx.compose.ui:ui-graphics-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\794d1171cb5cde4a54f939dc7fe862fa\transformed\ui-graphics\AndroidManifest.xml:2:1-7:12
@@ -23,6 +23,7 @@ MERGED from [androidx.navigationevent:navigationevent-android:1.0.2] C:\Users\ul
 MERGED from [androidx.navigationevent:navigationevent-compose-android:1.0.2] C:\Users\ulidk\.gradle\caches\8.13\transforms\bbb220ff890338010052e42a295509b6\transformed\navigationevent-compose\AndroidManifest.xml:2:1-7:12
 MERGED from [androidx.compose.runtime:runtime-annotation-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\ad0882b6ff4304b2de065c620745eeaa\transformed\runtime-annotation\AndroidManifest.xml:2:1-7:12
 MERGED from [androidx.compose.runtime:runtime-retain-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\7415f2e16b03c74b4f94c9e48493fe9a\transformed\runtime-retain\AndroidManifest.xml:2:1-7:12
+MERGED from [androidx.activity:activity-ktx:1.12.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\956f14b267d626d5be62e40de7bcbc35\transformed\activity-ktx-1.12.4\AndroidManifest.xml:2:1-7:12
 MERGED from [androidx.customview:customview-poolingcontainer:1.0.0] C:\Users\ulidk\.gradle\caches\8.13\transforms\0f95cd9910e25f83d97b4c8f4ecf2843\transformed\customview-poolingcontainer-1.0.0\AndroidManifest.xml:17:1-23:12
 MERGED from [androidx.core:core-ktx:1.16.0] C:\Users\ulidk\.gradle\caches\8.13\transforms\0c5ff4840741b6d49c228b38fdd005f0\transformed\core-ktx-1.16.0\AndroidManifest.xml:2:1-7:12
 MERGED from [androidx.autofill:autofill:1.0.0] C:\Users\ulidk\.gradle\caches\8.13\transforms\42af1b0851e501ec026cba26b57190d5\transformed\autofill-1.0.0\AndroidManifest.xml:17:1-24:12
@@ -53,7 +54,7 @@ MERGED from [androidx.compose.runtime:runtime-saveable-android:1.10.4] C:\Users\
 MERGED from [androidx.lifecycle:lifecycle-runtime-compose-android:2.10.0] C:\Users\ulidk\.gradle\caches\8.13\transforms\9c4ba5135ff0770e10e52f6663022f2c\transformed\lifecycle-runtime-compose\AndroidManifest.xml:2:1-7:12
 MERGED from [androidx.lifecycle:lifecycle-viewmodel-compose-android:2.10.0] C:\Users\ulidk\.gradle\caches\8.13\transforms\e262bb01aa5cae4897221d4ce53d73d3\transformed\lifecycle-viewmodel-compose\AndroidManifest.xml:2:1-7:12
 MERGED from [androidx.compose.ui:ui-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\1b4f7b4eecabd461e87fe661d32b9b3c\transformed\ui\AndroidManifest.xml:2:1-7:12
-MERGED from [androidx.activity:activity-ktx:1.12.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\956f14b267d626d5be62e40de7bcbc35\transformed\activity-ktx-1.12.4\AndroidManifest.xml:2:1-7:12
+MERGED from [androidx.compose.ui:ui-test-manifest:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\1d41a65310804b1c81dcfd540f7a9525\transformed\ui-test-manifest-1.10.4\AndroidManifest.xml:17:1-29:12
 MERGED from [androidx.activity:activity:1.12.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\adfa69518881546fe0be65b43388d6c5\transformed\activity-1.12.4\AndroidManifest.xml:17:1-22:12
 MERGED from [androidx.activity:activity-compose:1.12.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\713b25dfeb0bb0d719e2836c9de4f3df\transformed\activity-compose-1.12.4\AndroidManifest.xml:2:1-7:12
 MERGED from [androidx.core:core-viewtree:1.0.0] C:\Users\ulidk\.gradle\caches\8.13\transforms\7f5093c01604c6f86faf311f1cdc4674\transformed\core-viewtree-1.0.0\AndroidManifest.xml:2:1-7:12
@@ -68,38 +69,38 @@ MERGED from [androidx.documentfile:documentfile:1.0.0] C:\Users\ulidk\.gradle\ca
 MERGED from [androidx.localbroadcastmanager:localbroadcastmanager:1.0.0] C:\Users\ulidk\.gradle\caches\8.13\transforms\4ce85f6161d08b95cf41d8013fc10e2d\transformed\localbroadcastmanager-1.0.0\AndroidManifest.xml:17:1-22:12
 MERGED from [androidx.print:print:1.0.0] C:\Users\ulidk\.gradle\caches\8.13\transforms\961e0891e01e5e9f607ae624c438c5a1\transformed\print-1.0.0\AndroidManifest.xml:17:1-22:12
 	package
-		INJECTED from C:\Users\ulidk\Downloads\mindwavemobile2\SamathaScope_v0.1.1_FINAL_patch2_compileSdk36\app\src\main\AndroidManifest.xml
+		INJECTED from C:\Users\ulidk\Documents\GitHub\SamathaScope\app\src\main\AndroidManifest.xml
 	android:versionName
-		INJECTED from C:\Users\ulidk\Downloads\mindwavemobile2\SamathaScope_v0.1.1_FINAL_patch2_compileSdk36\app\src\main\AndroidManifest.xml
+		INJECTED from C:\Users\ulidk\Documents\GitHub\SamathaScope\app\src\main\AndroidManifest.xml
 	android:versionCode
-		INJECTED from C:\Users\ulidk\Downloads\mindwavemobile2\SamathaScope_v0.1.1_FINAL_patch2_compileSdk36\app\src\main\AndroidManifest.xml
+		INJECTED from C:\Users\ulidk\Documents\GitHub\SamathaScope\app\src\main\AndroidManifest.xml
 	xmlns:android
-		ADDED from C:\Users\ulidk\Downloads\mindwavemobile2\SamathaScope_v0.1.1_FINAL_patch2_compileSdk36\app\src\main\AndroidManifest.xml:1:11-69
+		ADDED from C:\Users\ulidk\Documents\GitHub\SamathaScope\app\src\main\AndroidManifest.xml:1:11-69
 uses-permission#android.permission.BLUETOOTH
-ADDED from C:\Users\ulidk\Downloads\mindwavemobile2\SamathaScope_v0.1.1_FINAL_patch2_compileSdk36\app\src\main\AndroidManifest.xml:3:3-93
+ADDED from C:\Users\ulidk\Documents\GitHub\SamathaScope\app\src\main\AndroidManifest.xml:3:3-93
 	android:maxSdkVersion
-		ADDED from C:\Users\ulidk\Downloads\mindwavemobile2\SamathaScope_v0.1.1_FINAL_patch2_compileSdk36\app\src\main\AndroidManifest.xml:3:64-90
+		ADDED from C:\Users\ulidk\Documents\GitHub\SamathaScope\app\src\main\AndroidManifest.xml:3:64-90
 	android:name
-		ADDED from C:\Users\ulidk\Downloads\mindwavemobile2\SamathaScope_v0.1.1_FINAL_patch2_compileSdk36\app\src\main\AndroidManifest.xml:3:20-63
+		ADDED from C:\Users\ulidk\Documents\GitHub\SamathaScope\app\src\main\AndroidManifest.xml:3:20-63
 uses-permission#android.permission.BLUETOOTH_ADMIN
-ADDED from C:\Users\ulidk\Downloads\mindwavemobile2\SamathaScope_v0.1.1_FINAL_patch2_compileSdk36\app\src\main\AndroidManifest.xml:4:3-99
+ADDED from C:\Users\ulidk\Documents\GitHub\SamathaScope\app\src\main\AndroidManifest.xml:4:3-99
 	android:maxSdkVersion
-		ADDED from C:\Users\ulidk\Downloads\mindwavemobile2\SamathaScope_v0.1.1_FINAL_patch2_compileSdk36\app\src\main\AndroidManifest.xml:4:70-96
+		ADDED from C:\Users\ulidk\Documents\GitHub\SamathaScope\app\src\main\AndroidManifest.xml:4:70-96
 	android:name
-		ADDED from C:\Users\ulidk\Downloads\mindwavemobile2\SamathaScope_v0.1.1_FINAL_patch2_compileSdk36\app\src\main\AndroidManifest.xml:4:20-69
+		ADDED from C:\Users\ulidk\Documents\GitHub\SamathaScope\app\src\main\AndroidManifest.xml:4:20-69
 uses-permission#android.permission.BLUETOOTH_CONNECT
-ADDED from C:\Users\ulidk\Downloads\mindwavemobile2\SamathaScope_v0.1.1_FINAL_patch2_compileSdk36\app\src\main\AndroidManifest.xml:6:3-74
+ADDED from C:\Users\ulidk\Documents\GitHub\SamathaScope\app\src\main\AndroidManifest.xml:6:3-74
 	android:name
-		ADDED from C:\Users\ulidk\Downloads\mindwavemobile2\SamathaScope_v0.1.1_FINAL_patch2_compileSdk36\app\src\main\AndroidManifest.xml:6:20-71
+		ADDED from C:\Users\ulidk\Documents\GitHub\SamathaScope\app\src\main\AndroidManifest.xml:6:20-71
 uses-permission#android.permission.BLUETOOTH_SCAN
-ADDED from C:\Users\ulidk\Downloads\mindwavemobile2\SamathaScope_v0.1.1_FINAL_patch2_compileSdk36\app\src\main\AndroidManifest.xml:7:3-9:56
+ADDED from C:\Users\ulidk\Documents\GitHub\SamathaScope\app\src\main\AndroidManifest.xml:7:3-9:56
 	android:usesPermissionFlags
-		ADDED from C:\Users\ulidk\Downloads\mindwavemobile2\SamathaScope_v0.1.1_FINAL_patch2_compileSdk36\app\src\main\AndroidManifest.xml:9:7-53
+		ADDED from C:\Users\ulidk\Documents\GitHub\SamathaScope\app\src\main\AndroidManifest.xml:9:7-53
 	android:name
-		ADDED from C:\Users\ulidk\Downloads\mindwavemobile2\SamathaScope_v0.1.1_FINAL_patch2_compileSdk36\app\src\main\AndroidManifest.xml:8:7-55
+		ADDED from C:\Users\ulidk\Documents\GitHub\SamathaScope\app\src\main\AndroidManifest.xml:8:7-55
 application
-ADDED from C:\Users\ulidk\Downloads\mindwavemobile2\SamathaScope_v0.1.1_FINAL_patch2_compileSdk36\app\src\main\AndroidManifest.xml:11:3-24:17
-INJECTED from C:\Users\ulidk\Downloads\mindwavemobile2\SamathaScope_v0.1.1_FINAL_patch2_compileSdk36\app\src\main\AndroidManifest.xml:11:3-24:17
+ADDED from C:\Users\ulidk\Documents\GitHub\SamathaScope\app\src\main\AndroidManifest.xml:11:3-24:17
+INJECTED from C:\Users\ulidk\Documents\GitHub\SamathaScope\app\src\main\AndroidManifest.xml:11:3-24:17
 MERGED from [androidx.compose.ui:ui-tooling-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\9496863e1e9c521a9600ca662c12f8bc\transformed\ui-tooling\AndroidManifest.xml:22:5-26:19
 MERGED from [androidx.compose.ui:ui-tooling-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\9496863e1e9c521a9600ca662c12f8bc\transformed\ui-tooling\AndroidManifest.xml:22:5-26:19
 MERGED from [androidx.window:window:1.5.0] C:\Users\ulidk\.gradle\caches\8.13\transforms\46bc526bfdd513bf8ef75bd155d601c2\transformed\window-1.5.0\AndroidManifest.xml:22:5-29:19
@@ -110,6 +111,8 @@ MERGED from [androidx.core:core:1.16.0] C:\Users\ulidk\.gradle\caches\8.13\trans
 MERGED from [androidx.core:core:1.16.0] C:\Users\ulidk\.gradle\caches\8.13\transforms\7f7325f9b16d79fb936d617a8874dc17\transformed\core-1.16.0\AndroidManifest.xml:28:5-89
 MERGED from [androidx.lifecycle:lifecycle-process:2.10.0] C:\Users\ulidk\.gradle\caches\8.13\transforms\f5dc3c8fec247a095bebea1f99ed1339\transformed\lifecycle-process-2.10.0\AndroidManifest.xml:23:5-33:19
 MERGED from [androidx.lifecycle:lifecycle-process:2.10.0] C:\Users\ulidk\.gradle\caches\8.13\transforms\f5dc3c8fec247a095bebea1f99ed1339\transformed\lifecycle-process-2.10.0\AndroidManifest.xml:23:5-33:19
+MERGED from [androidx.compose.ui:ui-test-manifest:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\1d41a65310804b1c81dcfd540f7a9525\transformed\ui-test-manifest-1.10.4\AndroidManifest.xml:22:5-27:19
+MERGED from [androidx.compose.ui:ui-test-manifest:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\1d41a65310804b1c81dcfd540f7a9525\transformed\ui-test-manifest-1.10.4\AndroidManifest.xml:22:5-27:19
 MERGED from [androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\ulidk\.gradle\caches\8.13\transforms\76a03c54d32ddd3dd9c754629bad4044\transformed\profileinstaller-1.4.0\AndroidManifest.xml:23:5-53:19
 MERGED from [androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\ulidk\.gradle\caches\8.13\transforms\76a03c54d32ddd3dd9c754629bad4044\transformed\profileinstaller-1.4.0\AndroidManifest.xml:23:5-53:19
 MERGED from [androidx.startup:startup-runtime:1.1.1] C:\Users\ulidk\.gradle\caches\8.13\transforms\d3211d22459917965b3611c207395598\transformed\startup-runtime-1.1.1\AndroidManifest.xml:25:5-31:19
@@ -117,51 +120,51 @@ MERGED from [androidx.startup:startup-runtime:1.1.1] C:\Users\ulidk\.gradle\cach
 MERGED from [androidx.versionedparcelable:versionedparcelable:1.1.1] C:\Users\ulidk\.gradle\caches\8.13\transforms\9c40d93c18db6600cb05ca154a358bd4\transformed\versionedparcelable-1.1.1\AndroidManifest.xml:24:5-25:19
 MERGED from [androidx.versionedparcelable:versionedparcelable:1.1.1] C:\Users\ulidk\.gradle\caches\8.13\transforms\9c40d93c18db6600cb05ca154a358bd4\transformed\versionedparcelable-1.1.1\AndroidManifest.xml:24:5-25:19
 	android:extractNativeLibs
-		INJECTED from C:\Users\ulidk\Downloads\mindwavemobile2\SamathaScope_v0.1.1_FINAL_patch2_compileSdk36\app\src\main\AndroidManifest.xml
+		INJECTED from C:\Users\ulidk\Documents\GitHub\SamathaScope\app\src\main\AndroidManifest.xml
 	android:appComponentFactory
 		ADDED from [androidx.core:core:1.16.0] C:\Users\ulidk\.gradle\caches\8.13\transforms\7f7325f9b16d79fb936d617a8874dc17\transformed\core-1.16.0\AndroidManifest.xml:28:18-86
 	android:supportsRtl
-		ADDED from C:\Users\ulidk\Downloads\mindwavemobile2\SamathaScope_v0.1.1_FINAL_patch2_compileSdk36\app\src\main\AndroidManifest.xml:14:7-33
+		ADDED from C:\Users\ulidk\Documents\GitHub\SamathaScope\app\src\main\AndroidManifest.xml:14:7-33
 	android:label
-		ADDED from C:\Users\ulidk\Downloads\mindwavemobile2\SamathaScope_v0.1.1_FINAL_patch2_compileSdk36\app\src\main\AndroidManifest.xml:13:7-39
+		ADDED from C:\Users\ulidk\Documents\GitHub\SamathaScope\app\src\main\AndroidManifest.xml:13:7-39
 	android:allowBackup
-		ADDED from C:\Users\ulidk\Downloads\mindwavemobile2\SamathaScope_v0.1.1_FINAL_patch2_compileSdk36\app\src\main\AndroidManifest.xml:12:7-33
+		ADDED from C:\Users\ulidk\Documents\GitHub\SamathaScope\app\src\main\AndroidManifest.xml:12:7-33
 	android:theme
-		ADDED from C:\Users\ulidk\Downloads\mindwavemobile2\SamathaScope_v0.1.1_FINAL_patch2_compileSdk36\app\src\main\AndroidManifest.xml:15:7-48
+		ADDED from C:\Users\ulidk\Documents\GitHub\SamathaScope\app\src\main\AndroidManifest.xml:15:7-48
 activity#com.mordin.samathascope.MainActivity
-ADDED from C:\Users\ulidk\Downloads\mindwavemobile2\SamathaScope_v0.1.1_FINAL_patch2_compileSdk36\app\src\main\AndroidManifest.xml:16:5-23:16
+ADDED from C:\Users\ulidk\Documents\GitHub\SamathaScope\app\src\main\AndroidManifest.xml:16:5-23:16
 	android:exported
-		ADDED from C:\Users\ulidk\Downloads\mindwavemobile2\SamathaScope_v0.1.1_FINAL_patch2_compileSdk36\app\src\main\AndroidManifest.xml:18:9-32
+		ADDED from C:\Users\ulidk\Documents\GitHub\SamathaScope\app\src\main\AndroidManifest.xml:18:9-32
 	android:name
-		ADDED from C:\Users\ulidk\Downloads\mindwavemobile2\SamathaScope_v0.1.1_FINAL_patch2_compileSdk36\app\src\main\AndroidManifest.xml:17:9-37
+		ADDED from C:\Users\ulidk\Documents\GitHub\SamathaScope\app\src\main\AndroidManifest.xml:17:9-37
 intent-filter#action:name:android.intent.action.MAIN+category:name:android.intent.category.LAUNCHER
-ADDED from C:\Users\ulidk\Downloads\mindwavemobile2\SamathaScope_v0.1.1_FINAL_patch2_compileSdk36\app\src\main\AndroidManifest.xml:19:7-22:23
+ADDED from C:\Users\ulidk\Documents\GitHub\SamathaScope\app\src\main\AndroidManifest.xml:19:7-22:23
 action#android.intent.action.MAIN
-ADDED from C:\Users\ulidk\Downloads\mindwavemobile2\SamathaScope_v0.1.1_FINAL_patch2_compileSdk36\app\src\main\AndroidManifest.xml:20:9-61
+ADDED from C:\Users\ulidk\Documents\GitHub\SamathaScope\app\src\main\AndroidManifest.xml:20:9-61
 	android:name
-		ADDED from C:\Users\ulidk\Downloads\mindwavemobile2\SamathaScope_v0.1.1_FINAL_patch2_compileSdk36\app\src\main\AndroidManifest.xml:20:17-58
+		ADDED from C:\Users\ulidk\Documents\GitHub\SamathaScope\app\src\main\AndroidManifest.xml:20:17-58
 category#android.intent.category.LAUNCHER
-ADDED from C:\Users\ulidk\Downloads\mindwavemobile2\SamathaScope_v0.1.1_FINAL_patch2_compileSdk36\app\src\main\AndroidManifest.xml:21:9-69
+ADDED from C:\Users\ulidk\Documents\GitHub\SamathaScope\app\src\main\AndroidManifest.xml:21:9-69
 	android:name
-		ADDED from C:\Users\ulidk\Downloads\mindwavemobile2\SamathaScope_v0.1.1_FINAL_patch2_compileSdk36\app\src\main\AndroidManifest.xml:21:19-66
+		ADDED from C:\Users\ulidk\Documents\GitHub\SamathaScope\app\src\main\AndroidManifest.xml:21:19-66
 uses-sdk
-INJECTED from C:\Users\ulidk\Downloads\mindwavemobile2\SamathaScope_v0.1.1_FINAL_patch2_compileSdk36\app\src\main\AndroidManifest.xml reason: use-sdk injection requested
-INJECTED from C:\Users\ulidk\Downloads\mindwavemobile2\SamathaScope_v0.1.1_FINAL_patch2_compileSdk36\app\src\main\AndroidManifest.xml
-INJECTED from C:\Users\ulidk\Downloads\mindwavemobile2\SamathaScope_v0.1.1_FINAL_patch2_compileSdk36\app\src\main\AndroidManifest.xml
+INJECTED from C:\Users\ulidk\Documents\GitHub\SamathaScope\app\src\main\AndroidManifest.xml reason: use-sdk injection requested
+INJECTED from C:\Users\ulidk\Documents\GitHub\SamathaScope\app\src\main\AndroidManifest.xml
+INJECTED from C:\Users\ulidk\Documents\GitHub\SamathaScope\app\src\main\AndroidManifest.xml
 MERGED from [androidx.compose.material3:material3-android:1.4.0] C:\Users\ulidk\.gradle\caches\8.13\transforms\7fb8a5f576fd05c67d9d81b5a6312f33\transformed\material3\AndroidManifest.xml:20:5-44
 MERGED from [androidx.compose.material3:material3-android:1.4.0] C:\Users\ulidk\.gradle\caches\8.13\transforms\7fb8a5f576fd05c67d9d81b5a6312f33\transformed\material3\AndroidManifest.xml:20:5-44
 MERGED from [androidx.compose.material:material-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\92e494421b67e1f7cbf068071f3dec60\transformed\material\AndroidManifest.xml:5:5-44
 MERGED from [androidx.compose.material:material-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\92e494421b67e1f7cbf068071f3dec60\transformed\material\AndroidManifest.xml:5:5-44
-MERGED from [androidx.compose.animation:animation-core-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\e177bc467ef2e1f14b23626622024cf5\transformed\animation-core\AndroidManifest.xml:5:5-44
-MERGED from [androidx.compose.animation:animation-core-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\e177bc467ef2e1f14b23626622024cf5\transformed\animation-core\AndroidManifest.xml:5:5-44
 MERGED from [androidx.compose.material:material-ripple-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\0218fffe8c86bce5ef23ac0da4420c2d\transformed\material-ripple\AndroidManifest.xml:5:5-44
 MERGED from [androidx.compose.material:material-ripple-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\0218fffe8c86bce5ef23ac0da4420c2d\transformed\material-ripple\AndroidManifest.xml:5:5-44
+MERGED from [androidx.compose.foundation:foundation-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\43d3fb5fdac3563226ed6408c3c63727\transformed\foundation\AndroidManifest.xml:5:5-44
+MERGED from [androidx.compose.foundation:foundation-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\43d3fb5fdac3563226ed6408c3c63727\transformed\foundation\AndroidManifest.xml:5:5-44
 MERGED from [androidx.compose.animation:animation-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\17c2e0fc97a02f9a8d742a25fe1fc85f\transformed\animation\AndroidManifest.xml:5:5-44
 MERGED from [androidx.compose.animation:animation-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\17c2e0fc97a02f9a8d742a25fe1fc85f\transformed\animation\AndroidManifest.xml:5:5-44
 MERGED from [androidx.compose.foundation:foundation-layout-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\824e9a2cdcd485a4c6138cc42f681c1e\transformed\foundation-layout\AndroidManifest.xml:5:5-44
 MERGED from [androidx.compose.foundation:foundation-layout-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\824e9a2cdcd485a4c6138cc42f681c1e\transformed\foundation-layout\AndroidManifest.xml:5:5-44
-MERGED from [androidx.compose.foundation:foundation-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\43d3fb5fdac3563226ed6408c3c63727\transformed\foundation\AndroidManifest.xml:5:5-44
-MERGED from [androidx.compose.foundation:foundation-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\43d3fb5fdac3563226ed6408c3c63727\transformed\foundation\AndroidManifest.xml:5:5-44
+MERGED from [androidx.compose.animation:animation-core-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\e177bc467ef2e1f14b23626622024cf5\transformed\animation-core\AndroidManifest.xml:5:5-44
+MERGED from [androidx.compose.animation:animation-core-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\e177bc467ef2e1f14b23626622024cf5\transformed\animation-core\AndroidManifest.xml:5:5-44
 MERGED from [androidx.compose.ui:ui-tooling-data-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\ca0d031a1c9b873388c2d12d4aececfd\transformed\ui-tooling-data\AndroidManifest.xml:5:5-44
 MERGED from [androidx.compose.ui:ui-tooling-data-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\ca0d031a1c9b873388c2d12d4aececfd\transformed\ui-tooling-data\AndroidManifest.xml:5:5-44
 MERGED from [androidx.compose.ui:ui-unit-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\412b769d32a8b7922b16a395d16b5f26\transformed\ui-unit\AndroidManifest.xml:5:5-44
@@ -186,6 +189,8 @@ MERGED from [androidx.compose.runtime:runtime-annotation-android:1.10.4] C:\User
 MERGED from [androidx.compose.runtime:runtime-annotation-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\ad0882b6ff4304b2de065c620745eeaa\transformed\runtime-annotation\AndroidManifest.xml:5:5-44
 MERGED from [androidx.compose.runtime:runtime-retain-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\7415f2e16b03c74b4f94c9e48493fe9a\transformed\runtime-retain\AndroidManifest.xml:5:5-44
 MERGED from [androidx.compose.runtime:runtime-retain-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\7415f2e16b03c74b4f94c9e48493fe9a\transformed\runtime-retain\AndroidManifest.xml:5:5-44
+MERGED from [androidx.activity:activity-ktx:1.12.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\956f14b267d626d5be62e40de7bcbc35\transformed\activity-ktx-1.12.4\AndroidManifest.xml:5:5-44
+MERGED from [androidx.activity:activity-ktx:1.12.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\956f14b267d626d5be62e40de7bcbc35\transformed\activity-ktx-1.12.4\AndroidManifest.xml:5:5-44
 MERGED from [androidx.customview:customview-poolingcontainer:1.0.0] C:\Users\ulidk\.gradle\caches\8.13\transforms\0f95cd9910e25f83d97b4c8f4ecf2843\transformed\customview-poolingcontainer-1.0.0\AndroidManifest.xml:20:5-21:38
 MERGED from [androidx.customview:customview-poolingcontainer:1.0.0] C:\Users\ulidk\.gradle\caches\8.13\transforms\0f95cd9910e25f83d97b4c8f4ecf2843\transformed\customview-poolingcontainer-1.0.0\AndroidManifest.xml:20:5-21:38
 MERGED from [androidx.core:core-ktx:1.16.0] C:\Users\ulidk\.gradle\caches\8.13\transforms\0c5ff4840741b6d49c228b38fdd005f0\transformed\core-ktx-1.16.0\AndroidManifest.xml:5:5-44
@@ -246,8 +251,8 @@ MERGED from [androidx.lifecycle:lifecycle-viewmodel-compose-android:2.10.0] C:\U
 MERGED from [androidx.lifecycle:lifecycle-viewmodel-compose-android:2.10.0] C:\Users\ulidk\.gradle\caches\8.13\transforms\e262bb01aa5cae4897221d4ce53d73d3\transformed\lifecycle-viewmodel-compose\AndroidManifest.xml:5:5-44
 MERGED from [androidx.compose.ui:ui-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\1b4f7b4eecabd461e87fe661d32b9b3c\transformed\ui\AndroidManifest.xml:5:5-44
 MERGED from [androidx.compose.ui:ui-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\1b4f7b4eecabd461e87fe661d32b9b3c\transformed\ui\AndroidManifest.xml:5:5-44
-MERGED from [androidx.activity:activity-ktx:1.12.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\956f14b267d626d5be62e40de7bcbc35\transformed\activity-ktx-1.12.4\AndroidManifest.xml:5:5-44
-MERGED from [androidx.activity:activity-ktx:1.12.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\956f14b267d626d5be62e40de7bcbc35\transformed\activity-ktx-1.12.4\AndroidManifest.xml:5:5-44
+MERGED from [androidx.compose.ui:ui-test-manifest:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\1d41a65310804b1c81dcfd540f7a9525\transformed\ui-test-manifest-1.10.4\AndroidManifest.xml:20:5-44
+MERGED from [androidx.compose.ui:ui-test-manifest:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\1d41a65310804b1c81dcfd540f7a9525\transformed\ui-test-manifest-1.10.4\AndroidManifest.xml:20:5-44
 MERGED from [androidx.activity:activity:1.12.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\adfa69518881546fe0be65b43388d6c5\transformed\activity-1.12.4\AndroidManifest.xml:20:5-44
 MERGED from [androidx.activity:activity:1.12.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\adfa69518881546fe0be65b43388d6c5\transformed\activity-1.12.4\AndroidManifest.xml:20:5-44
 MERGED from [androidx.activity:activity-compose:1.12.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\713b25dfeb0bb0d719e2836c9de4f3df\transformed\activity-compose-1.12.4\AndroidManifest.xml:5:5-44
@@ -275,9 +280,9 @@ MERGED from [androidx.localbroadcastmanager:localbroadcastmanager:1.0.0] C:\User
 MERGED from [androidx.print:print:1.0.0] C:\Users\ulidk\.gradle\caches\8.13\transforms\961e0891e01e5e9f607ae624c438c5a1\transformed\print-1.0.0\AndroidManifest.xml:20:5-44
 MERGED from [androidx.print:print:1.0.0] C:\Users\ulidk\.gradle\caches\8.13\transforms\961e0891e01e5e9f607ae624c438c5a1\transformed\print-1.0.0\AndroidManifest.xml:20:5-44
 	android:targetSdkVersion
-		INJECTED from C:\Users\ulidk\Downloads\mindwavemobile2\SamathaScope_v0.1.1_FINAL_patch2_compileSdk36\app\src\main\AndroidManifest.xml
+		INJECTED from C:\Users\ulidk\Documents\GitHub\SamathaScope\app\src\main\AndroidManifest.xml
 	android:minSdkVersion
-		INJECTED from C:\Users\ulidk\Downloads\mindwavemobile2\SamathaScope_v0.1.1_FINAL_patch2_compileSdk36\app\src\main\AndroidManifest.xml
+		INJECTED from C:\Users\ulidk\Documents\GitHub\SamathaScope\app\src\main\AndroidManifest.xml
 activity#androidx.compose.ui.tooling.PreviewActivity
 ADDED from [androidx.compose.ui:ui-tooling-android:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\9496863e1e9c521a9600ca662c12f8bc\transformed\ui-tooling\AndroidManifest.xml:23:9-25:39
 	android:exported
@@ -344,6 +349,14 @@ ADDED from [androidx.lifecycle:lifecycle-process:2.10.0] C:\Users\ulidk\.gradle\
 		ADDED from [androidx.lifecycle:lifecycle-process:2.10.0] C:\Users\ulidk\.gradle\caches\8.13\transforms\f5dc3c8fec247a095bebea1f99ed1339\transformed\lifecycle-process-2.10.0\AndroidManifest.xml:31:17-49
 	android:name
 		ADDED from [androidx.lifecycle:lifecycle-process:2.10.0] C:\Users\ulidk\.gradle\caches\8.13\transforms\f5dc3c8fec247a095bebea1f99ed1339\transformed\lifecycle-process-2.10.0\AndroidManifest.xml:30:17-78
+activity#androidx.activity.ComponentActivity
+ADDED from [androidx.compose.ui:ui-test-manifest:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\1d41a65310804b1c81dcfd540f7a9525\transformed\ui-test-manifest-1.10.4\AndroidManifest.xml:23:9-26:79
+	android:exported
+		ADDED from [androidx.compose.ui:ui-test-manifest:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\1d41a65310804b1c81dcfd540f7a9525\transformed\ui-test-manifest-1.10.4\AndroidManifest.xml:25:13-36
+	android:theme
+		ADDED from [androidx.compose.ui:ui-test-manifest:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\1d41a65310804b1c81dcfd540f7a9525\transformed\ui-test-manifest-1.10.4\AndroidManifest.xml:26:13-76
+	android:name
+		ADDED from [androidx.compose.ui:ui-test-manifest:1.10.4] C:\Users\ulidk\.gradle\caches\8.13\transforms\1d41a65310804b1c81dcfd540f7a9525\transformed\ui-test-manifest-1.10.4\AndroidManifest.xml:24:13-63
 meta-data#androidx.profileinstaller.ProfileInstallerInitializer
 ADDED from [androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\ulidk\.gradle\caches\8.13\transforms\76a03c54d32ddd3dd9c754629bad4044\transformed\profileinstaller-1.4.0\AndroidManifest.xml:29:13-31:52
 	android:value

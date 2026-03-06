@@ -1,7 +1,7 @@
 {
     "logs": [
         {
-            "outputFile": "com.mordin.samathascope.app-mergeDebugResources-36:/values-as/values-as.xml",
+            "outputFile": "com.mordin.samathascope.app-mergeDebugResources-37:/values-as/values-as.xml",
             "map": [
                 {
                     "source": "C:\\Users\\ulidk\\.gradle\\caches\\8.13\\transforms\\43d3fb5fdac3563226ed6408c3c63727\\transformed\\foundation\\res\\values-as\\values-as.xml",

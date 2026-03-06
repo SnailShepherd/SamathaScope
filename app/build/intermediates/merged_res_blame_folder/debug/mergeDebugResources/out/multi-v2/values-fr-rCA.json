@@ -1,7 +1,7 @@
 {
     "logs": [
         {
-            "outputFile": "com.mordin.samathascope.app-mergeDebugResources-36:/values-fr-rCA/values-fr-rCA.xml",
+            "outputFile": "com.mordin.samathascope.app-mergeDebugResources-37:/values-fr-rCA/values-fr-rCA.xml",
             "map": [
                 {
                     "source": "C:\\Users\\ulidk\\.gradle\\caches\\8.13\\transforms\\92e494421b67e1f7cbf068071f3dec60\\transformed\\material\\res\\values-fr-rCA\\values-fr-rCA.xml",
