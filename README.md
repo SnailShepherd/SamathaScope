@@ -2,9 +2,9 @@
 
 SamathaScope is an Android biofeedback app for MindWave Mobile 2, focused on Samatha-style training support.
 
-Current app version: `0.2` (`versionCode 2`)
+Current app version: `0.3` (`versionCode 3`)
 
-## What v0.2 includes
+## What v0.3 includes
 
 - 4-tab UI: `Dashboard`, `Signals`, `Game`, `Learn`.
 - Oldschool/utilitarian visual style with full labels (no shortened metric names in controls).
@@ -27,13 +27,13 @@ Note: the app uses bonded-device selection (no in-app Bluetooth scan flow yet).
 
 ## Tabs and behavior
 
-- `Dashboard`: headset status, session controls, diagnostics, and raw EEG plot.
+- `Dashboard`: headset status, session controls, diagnostics, and live plot with in-tab metric selection.
 - Gear button opens settings panel (recording/app-level controls).
 - `Signals`: feedback metric selection, audio feedback controls, live plot selection, per-plot settings editor.
 - `Game`: endless levitation scene with horizon/grid reference and full HUD.
 - `Learn`: offline summary cards, optional external references, explicit interpretation caveat.
 
-## Plot defaults (v0.2)
+## Plot defaults (v0.3)
 
 - Raw EEG default window: `5s`.
 - Metric plots default window: `300s` (5 minutes).

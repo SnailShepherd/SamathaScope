@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -54,6 +55,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalUriHandler
@@ -130,6 +132,7 @@ private fun MainScreen(vm: MainViewModel) {
           onStartSession = vm::startSession,
           onTogglePause = vm::togglePause,
           onStopSession = vm::stopSession,
+          onPlotTypeChange = vm::setPlotType,
         )
 
         AppTab.SIGNALS -> SignalsTab(
@@ -192,6 +195,7 @@ private fun DashboardTab(
   onStartSession: () -> Unit,
   onTogglePause: () -> Unit,
   onStopSession: () -> Unit,
+  onPlotTypeChange: (PlotType) -> Unit,
 ) {
   BoxWithConstraints(
     modifier = Modifier
@@ -219,7 +223,7 @@ private fun DashboardTab(
           )
         }
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-          DashboardRawPlotSection(ui)
+          DashboardLivePlotSection(ui = ui, onPlotTypeChange = onPlotTypeChange)
           DiagnosticsSection(ui)
         }
       }
@@ -238,7 +242,7 @@ private fun DashboardTab(
           onTogglePause = onTogglePause,
           onStopSession = onStopSession,
         )
-        DashboardRawPlotSection(ui)
+        DashboardLivePlotSection(ui = ui, onPlotTypeChange = onPlotTypeChange)
         DiagnosticsSection(ui)
       }
     }
@@ -301,14 +305,11 @@ private fun ConnectionSection(
     }
 
     Spacer(Modifier.height(8.dp))
-    ValueText(
-      stringResource(
-        R.string.telemetry_line,
-        ui.poorSignal,
-        ui.samplesPerSecond.roundToInt(),
-        ui.streamStallMs,
-      )
-    )
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
+      HudRow(label = stringResource(R.string.telemetry_poor_signal), value = "${ui.poorSignal}")
+      HudRow(label = stringResource(R.string.telemetry_samples_per_second), value = "${ui.samplesPerSecond.roundToInt()}")
+      HudRow(label = stringResource(R.string.telemetry_stall_ms), value = "${ui.streamStallMs} ms")
+    }
   }
 }
 
@@ -349,46 +350,86 @@ private fun SessionSection(
 
     Spacer(Modifier.height(10.dp))
 
-    if (ui.calibrating) {
-      Text(
-        stringResource(R.string.calibrating_countdown, ui.calibrationRemainingSec),
-        fontWeight = FontWeight.SemiBold
-      )
-      LinearProgressIndicator(
-        progress = ((60 - ui.calibrationRemainingSec).coerceIn(0, 60) / 60f),
-        modifier = Modifier.fillMaxWidth()
-      )
-      Text(stringResource(R.string.calibration_hint), style = MaterialTheme.typography.bodySmall)
-    } else if (ui.sessionRunning) {
-      ValueText(
-        stringResource(
-          R.string.session_stats,
-          ui.sessionElapsedSec,
-          (ui.avgSamathaScore * 100).roundToInt(),
-          ui.timeSamathaOver80Seconds,
-        )
-      )
-    } else {
-      Text(stringResource(R.string.idle_status), style = MaterialTheme.typography.bodySmall)
+    Box(
+      modifier = Modifier
+        .fillMaxWidth()
+        .heightIn(min = 100.dp)
+    ) {
+      if (ui.calibrating) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+          Text(
+            stringResource(R.string.calibrating_countdown, ui.calibrationRemainingSec),
+            fontWeight = FontWeight.SemiBold
+          )
+          LinearProgressIndicator(
+            progress = ((60 - ui.calibrationRemainingSec).coerceIn(0, 60) / 60f),
+            modifier = Modifier.fillMaxWidth()
+          )
+          Text(stringResource(R.string.calibration_hint), style = MaterialTheme.typography.bodySmall)
+        }
+      } else if (ui.sessionRunning) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
+          HudRow(label = stringResource(R.string.session_elapsed_label), value = "${ui.sessionElapsedSec}s")
+          HudRow(label = stringResource(R.string.session_avg_samatha_label), value = "${(ui.avgSamathaScore * 100).roundToInt()}%")
+          HudRow(label = stringResource(R.string.session_over_80_label), value = "${ui.timeSamathaOver80Seconds}s")
+        }
+      } else {
+        Text(stringResource(R.string.idle_status), style = MaterialTheme.typography.bodySmall)
+      }
     }
   }
 }
 
 @Composable
-private fun DashboardRawPlotSection(ui: UiState) {
-  val settings = ui.plotSettings.getValue(PlotType.RAW)
-  Panel {
-    Text(stringResource(R.string.section_raw_eeg), fontWeight = FontWeight.SemiBold)
-    Spacer(Modifier.height(8.dp))
-    WaveformPlot(
-      samples = ui.rawPreview,
-      yMin = settings.yMin,
-      yMax = settings.yMax,
+private fun DashboardLivePlotSection(
+  ui: UiState,
+  onPlotTypeChange: (PlotType) -> Unit,
+) {
+  val plotTypes = remember {
+    listOf(
+      PlotType.RAW,
+      PlotType.SAMATHA_SCORE,
+      PlotType.ARTEFACT_SCORE,
+      PlotType.RELAXED_ALERTNESS_INDEX,
+      PlotType.ESENSE_MEDITATION,
+      PlotType.ESENSE_ATTENTION,
     )
+  }
+
+  val settings = ui.plotSettings.getValue(ui.plotType)
+
+  Panel {
+    Text(stringResource(R.string.section_live_plot), fontWeight = FontWeight.SemiBold)
+    Spacer(Modifier.height(8.dp))
+
+    ChoiceRow(
+      options = plotTypes,
+      selected = ui.plotType,
+      onSelect = onPlotTypeChange,
+    )
+
+    Spacer(Modifier.height(8.dp))
+    ValueText(stringResource(R.string.live_plot_current, plotTypeLabel(ui.plotType)))
+
+    Spacer(Modifier.height(8.dp))
+    if (ui.plotType == PlotType.RAW) {
+      WaveformPlot(
+        samples = ui.rawPreview,
+        yMin = settings.yMin,
+        yMax = settings.yMax,
+      )
+    } else {
+      MetricPlot(
+        values = ui.plotHistory,
+        yMin = settings.yMin,
+        yMax = settings.yMax,
+      )
+    }
+
     Spacer(Modifier.height(6.dp))
     ValueText(
       stringResource(
-        R.string.raw_range_label,
+        R.string.live_range_label,
         settings.windowSeconds,
         settings.yMin.roundToInt(),
         settings.yMax.roundToInt(),
@@ -494,11 +535,13 @@ private fun SignalsTab(
         label = stringResource(R.string.crackle_overlay),
         onCheckedChange = onCrackleEnabledChange,
       )
+      Text(stringResource(R.string.crackle_helper), style = MaterialTheme.typography.bodySmall)
 
       Spacer(Modifier.height(8.dp))
 
       Text(stringResource(R.string.gamma_value, ui.gamma), style = MaterialTheme.typography.bodySmall)
       Slider(value = ui.gamma, onValueChange = onGammaChange, valueRange = 0.6f..3.0f)
+      Text(stringResource(R.string.gamma_helper), style = MaterialTheme.typography.bodySmall)
 
       Text(
         stringResource(R.string.base_noise_range, ui.gMinDb, ui.gMaxDb),
@@ -644,6 +687,10 @@ private fun LearnTab() {
       body = stringResource(R.string.learn_score_body),
     )
     LearnCard(
+      title = stringResource(R.string.learn_metric_difference_title),
+      body = stringResource(R.string.learn_metric_difference_body),
+    )
+    LearnCard(
       title = stringResource(R.string.learn_caveat_title),
       body = stringResource(R.string.learn_caveat_body),
     )
@@ -738,6 +785,7 @@ private fun ValueText(text: String) {
     text = text,
     style = MaterialTheme.typography.bodySmall,
     fontFamily = FontFamily.Monospace,
+    maxLines = 1,
   )
 }
 
@@ -787,14 +835,18 @@ private fun LevitationScene(altitude: Float) {
     modifier = Modifier
       .fillMaxWidth()
       .height(240.dp)
+      .background(
+        brush = Brush.verticalGradient(
+          listOf(
+            colorScheme.primaryContainer.copy(alpha = 0.35f),
+            colorScheme.surfaceVariant,
+            colorScheme.surface,
+          )
+        ),
+        shape = RoundedCornerShape(4.dp),
+      )
       .border(1.dp, outlineColor, RoundedCornerShape(4.dp))
   ) {
-    androidx.compose.foundation.Image(
-      painter = androidx.compose.ui.res.painterResource(id = R.drawable.game_landscape_placeholder),
-      contentDescription = null,
-      contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-      modifier = Modifier.matchParentSize()
-    )
 
     Canvas(
       modifier = Modifier

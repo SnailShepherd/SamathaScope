@@ -43,6 +43,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   private val calibration = CalibrationManager(calibrationSeconds = 60)
   private val scorer = ScoreModel()
   private val metricHistory = MetricHistory(maxSeconds = 600, pointsPerSecond = 4)
+  private val smoothingWindowPoints = 16
+  private val samathaSmoother = RollingAverage(smoothingWindowPoints)
+  private val relaxedAlertnessSmoother = RollingAverage(smoothingWindowPoints)
+  private val artefactSmoother = RollingAverage(smoothingWindowPoints)
 
   private var statsSumSamatha = 0f
   private var statsCount = 0
@@ -64,6 +68,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   private var rawPreviewDecim: Int = 0
 
   private var lastGameUpdateMs: Long = 0L
+  private var lastAdaptiveCalibrationUpdateMs: Long = 0L
   private var calibrationRawCount = 0
   private var calibrationRawMean = 0.0
   private var calibrationRawM2 = 0.0
@@ -151,6 +156,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     timeSamathaOver80Ms = 0L
     lastFeatureTsMs = 0L
     lastGameUpdateMs = 0L
+    lastAdaptiveCalibrationUpdateMs = 0L
+    samathaSmoother.reset()
+    relaxedAlertnessSmoother.reset()
+    artefactSmoother.reset()
 
     sessionStartMs = System.currentTimeMillis()
     pausedAtMs = 0L
@@ -212,6 +221,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
         if (calibration.isDone() && _ui.value.calibrating) {
           scorer.setCalibration(calibration.buildCalibration())
+          calibration.seedAdaptiveWindowFromCalibration()
+          lastAdaptiveCalibrationUpdateMs = now
           applyCalibratedRawRangeIfNeeded()
           _ui.update { it.copy(calibrating = false) }
 
@@ -407,7 +418,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val features = eegProcessor.pushRaw(raw, now)
 
     rawPreviewDecim++
-    if (rawPreviewDecim % 32 == 0 && _ui.value.plotType == PlotType.RAW) {
+    if (rawPreviewDecim % 32 == 0) {
       refreshRawPreview()
     }
 
@@ -417,42 +428,55 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val stallMs = if (prev == 0L) 0L else (now - prev).coerceAtLeast(0)
     val artefacts = scorer.artefacts(poorSignal = poorSignal, features = features, stallMs = stallMs)
 
+    val runningActive = _ui.value.sessionRunning && !_ui.value.sessionPaused
+
     if (_ui.value.sessionRunning && _ui.value.calibrating) {
       calibration.addSample(rai = features.rai, artefactA = artefacts.totalA)
+    } else if (runningActive && !_ui.value.calibrating) {
+      calibration.addAdaptiveSample(
+        rai = features.rai,
+        artefactA = artefacts.totalA,
+        poorSignal = poorSignal,
+      )
+      maybeUpdateAdaptiveCalibration(now)
     }
 
-    val samathaScore = scorer.scoreS(
+    val samathaScoreInstant = scorer.scoreS(
       rai = features.rai,
       artefactA = artefacts.totalA,
       artefactsReduceScore = _ui.value.artefactsReduceScore
     )
+    val relaxedAlertnessInstant = scorer.normaliseRai(features.rai)
+    val artefactInstant = artefacts.totalA
 
-    if (_ui.value.sessionRunning && !_ui.value.sessionPaused) {
-      statsSumSamatha += samathaScore
+    val samathaScoreSmoothed = samathaSmoother.add(samathaScoreInstant)
+    val relaxedAlertnessSmoothed = relaxedAlertnessSmoother.add(relaxedAlertnessInstant)
+    val artefactSmoothed = artefactSmoother.add(artefactInstant)
+
+    if (runningActive) {
+      statsSumSamatha += samathaScoreInstant
       statsCount++
 
       if (lastFeatureTsMs != 0L) {
         val dt = (now - lastFeatureTsMs).coerceAtLeast(0)
-        if (samathaScore >= 0.80f) timeSamathaOver80Ms += dt
+        if (samathaScoreInstant >= 0.80f) timeSamathaOver80Ms += dt
       }
       lastFeatureTsMs = now
     }
 
-    val relaxedAlertness = scorer.normaliseRai(features.rai)
-
     metricHistory.add(
-      samathaScore = samathaScore,
-      artefactScore = artefacts.totalA,
-      relaxedAlertnessIndex = relaxedAlertness,
+      samathaScore = samathaScoreSmoothed,
+      artefactScore = artefactSmoothed,
+      relaxedAlertnessIndex = relaxedAlertnessSmoothed,
       meditationValue = _ui.value.meditation,
       attentionValue = _ui.value.attention
     )
 
     val feedback = metricValueForType(
       type = _ui.value.feedbackMetric,
-      samathaScore = samathaScore,
-      artefactScore = artefacts.totalA,
-      relaxedAlertnessIndex = relaxedAlertness,
+      samathaScore = samathaScoreSmoothed,
+      artefactScore = artefactSmoothed,
+      relaxedAlertnessIndex = relaxedAlertnessSmoothed,
       meditation = _ui.value.meditation,
       attention = _ui.value.attention,
     )
@@ -461,7 +485,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     if (shouldAudioRun) {
       audio?.update(
         scoreS = feedback,
-        artefactA = artefacts.totalA,
+        artefactA = artefactSmoothed,
         invertReward = _ui.value.invertReward,
         gamma = _ui.value.gamma,
         gMinDb = _ui.value.gMinDb,
@@ -477,8 +501,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     recorder?.appendFeatures(
       timestampMs = now,
       rai = features.rai,
-      scoreS = samathaScore,
-      scoreA = artefacts.totalA,
+      scoreS = samathaScoreInstant,
+      scoreA = artefactInstant,
       poorSignal = poorSignal,
       aContact = artefacts.contact,
       aLine = artefacts.line,
@@ -492,9 +516,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     val gameMetricValue = metricValueForType(
       type = _ui.value.gameState.metric,
-      samathaScore = samathaScore,
-      artefactScore = artefacts.totalA,
-      relaxedAlertnessIndex = relaxedAlertness,
+      samathaScore = samathaScoreSmoothed,
+      artefactScore = artefactSmoothed,
+      relaxedAlertnessIndex = relaxedAlertnessSmoothed,
       meditation = _ui.value.meditation,
       attention = _ui.value.attention,
     )
@@ -517,9 +541,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     _ui.update {
       it.copy(
-        relaxedAlertnessIndex = relaxedAlertness,
-        samathaScore = samathaScore,
-        artefactScore = artefacts.totalA,
+        relaxedAlertnessIndex = relaxedAlertnessInstant,
+        samathaScore = samathaScoreInstant,
+        artefactScore = artefactInstant,
         avgSamathaScore = avgSamatha,
         timeSamathaOver80Seconds = over80Seconds,
 
@@ -540,7 +564,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         ),
         gameHudState = it.gameHudState.copy(
           metricValuePercent = (gameMetricValue * 100f).toInt().coerceIn(0, 100),
-          artefactPercent = (artefacts.totalA * 100f).toInt().coerceIn(0, 100),
+          artefactPercent = (artefactSmoothed * 100f).toInt().coerceIn(0, 100),
           poorSignal = poorSignal,
           elapsedSeconds = it.sessionElapsedSec,
           batteryPercent = it.batteryPercent,
@@ -549,6 +573,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     refreshSelectedPlotSeries()
+  }
+
+  private fun maybeUpdateAdaptiveCalibration(now: Long) {
+    if (now - lastAdaptiveCalibrationUpdateMs < 1000L) return
+    calibration.buildAdaptiveCalibration()?.let { scorer.setCalibration(it) }
+    lastAdaptiveCalibrationUpdateMs = now
   }
 
   private fun metricValueForType(

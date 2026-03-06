@@ -20,18 +20,18 @@ data class ArtefactBreakdown(
  * - artefact score A in [0, 1]
  * - training score S in [0, 1]
  *
- * Design goal: be robust on a **single dry frontal electrode**.
- * That means we treat high-frequency power (20–45 Hz) mostly as muscle/EMG contamination,
+ * Design goal: be robust on a single dry frontal electrode.
+ * That means we treat high-frequency power (20-45 Hz) mostly as muscle/EMG contamination,
  * and we explicitly penalise it.
  */
 class ScoreModel {
 
   /**
-   * Calibration stores percentiles for normalising RAI to [0,1] for *your* baseline.
+   * Calibration stores percentiles for normalising RAI to [0,1] for your baseline.
    *
    * Why percentiles (P10/P90) instead of mean/std?
    * - percentiles are less fragile with weird outliers (blinks, contact glitches)
-   * - you don't need to assume any distribution
+   * - you do not need to assume any distribution
    */
   private var cal: Calibration? = null
 
@@ -52,24 +52,27 @@ class ScoreModel {
    * Compute artefact score A in [0,1].
    *
    * Components:
-   * - contact telemetry (PoorSignal): "is the electrode even connected?"
-   * - line noise around 50 Hz (Netherlands mains)
-   * - EMG proxy: fraction of 20–45 Hz power in total 1–45 Hz (jaw/forehead tension)
+   * - contact telemetry (PoorSignal): is the electrode connected?
+   * - line noise around 50 Hz (diagnostics only)
+   * - EMG proxy: fraction of 20-45 Hz power in total 1-45 Hz (jaw/forehead tension)
    * - blink/transient proxy: derivative spikes
    * - packet stalls: Bluetooth hiccups
    *
-   * Weighting is chosen for *practical* use:
-   * contact + EMG matter most, then line and blinks, then stalls.
+   * Weighting in totalA:
+   * - contact 0.40
+   * - emg 0.30
+   * - blink 0.20
+   * - stall 0.10
    */
   fun artefacts(poorSignal: Int, features: EegFeatures, stallMs: Long): ArtefactBreakdown {
     // PoorSignal is 0 good, higher means worse. NeuroSky uses 0..255.
     val contact = (poorSignal / 200f).coerceIn(0f, 1f)
 
-    // 50 Hz line noise ratio relative to 1–45 Hz power.
+    // 50 Hz line noise ratio relative to 1-45 Hz power (diagnostics only).
     val line = (features.line50 / (features.total145 + 1e-6f)).coerceIn(0f, 1f) * 3f
     val lineC = line.coerceIn(0f, 1f)
 
-    // EMG proxy already in [0,1] (20–45 / 1–45).
+    // EMG proxy already in [0,1] (20-45 / 1-45).
     val emg = features.emgFrac.coerceIn(0f, 1f)
 
     // Blink/transient proxy already [0,1].
@@ -79,10 +82,9 @@ class ScoreModel {
     val stall = (stallMs / 500f).coerceIn(0f, 1f)
 
     val total = (
-      0.35f * contact +
-      0.15f * lineC +
-      0.25f * emg +
-      0.15f * blink +
+      0.40f * contact +
+      0.30f * emg +
+      0.20f * blink +
       0.10f * stall
     ).coerceIn(0f, 1f)
 
@@ -101,18 +103,15 @@ class ScoreModel {
    * Training score S in [0,1].
    *
    * Base is normalised RAI:
-   *   RAI = ln( alpha(8-12) / hi(20-45) )
+   *   RAI = ln(alpha(8-12) / hi(20-45))
    *
-   * Then we apply an artefact penalty (optional checkbox), because it helps you
-   * train a physically stable state:
-   * - fewer saccades/blinks
-   * - less face tension
+   * Then we optionally apply an artefact penalty.
    */
   fun scoreS(rai: Float, artefactA: Float, artefactsReduceScore: Boolean): Float {
     var s = normaliseRai(rai)
 
     if (artefactsReduceScore) {
-      // Strong penalty for artefacts; keep some gradient so feedback doesn't "die".
+      // Keep some gradient so feedback does not die completely at high artefact.
       s *= (1f - 0.7f * artefactA).coerceIn(0.05f, 1f)
     }
     return s.coerceIn(0f, 1f)

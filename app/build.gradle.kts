@@ -1,4 +1,4 @@
-﻿plugins {
+plugins {
   id("com.android.application")
   id("org.jetbrains.kotlin.android")
   id("org.jetbrains.kotlin.plugin.compose")
@@ -12,8 +12,8 @@ android {
     applicationId = "com.mordin.samathascope"
     minSdk = 26
     targetSdk = 35
-    versionCode = 2
-    versionName = "0.2"
+    versionCode = 3
+    versionName = "0.3"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

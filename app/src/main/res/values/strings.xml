@@ -1,6 +1,6 @@
-﻿<resources>
+<resources>
   <string name="app_name">SamathaScope</string>
-  <string name="app_title">SamathaScope v0.2</string>
+  <string name="app_title">SamathaScope v0.3</string>
   <string name="settings">Settings</string>
 
   <string name="tab_dashboard">Dashboard</string>
@@ -18,6 +18,9 @@
   <string name="disconnect">Disconnect</string>
   <string name="select_device">Select paired device</string>
   <string name="telemetry_line">Poor signal: %1$d   Samples/s: %2$d   Stall: %3$d ms</string>
+  <string name="telemetry_poor_signal">Poor signal</string>
+  <string name="telemetry_samples_per_second">Samples/s</string>
+  <string name="telemetry_stall_ms">Stream stall</string>
 
   <string name="section_session">Session</string>
   <string name="start_session">Start session</string>
@@ -27,25 +30,32 @@
   <string name="calibrating_countdown">Calibrating: %1$ds</string>
   <string name="calibration_hint">Sit still and relax your face while calibration completes.</string>
   <string name="session_stats">Session: %1$ds   Avg Samatha: %2$d%%   Samatha >= 80%%: %3$ds</string>
+  <string name="session_elapsed_label">Session elapsed</string>
+  <string name="session_avg_samatha_label">Average Samatha</string>
+  <string name="session_over_80_label">Samatha >= 80%%</string>
   <string name="idle_status">Idle</string>
 
   <string name="section_raw_eeg">Raw EEG</string>
   <string name="raw_range_label">Window: %1$ds   Y range: %2$d to %3$d (raw units)</string>
+  <string name="live_plot_current">Showing: %1$s</string>
+  <string name="live_range_label">Window: %1$ds   Y range: %2$d to %3$d</string>
 
   <string name="section_diagnostics">Diagnostics</string>
   <string name="diagnostic_contact">Contact quality</string>
-  <string name="diagnostic_line">Line noise (50Hz)</string>
+  <string name="diagnostic_line">Line noise (50Hz, diagnostics only)</string>
   <string name="diagnostic_emg">EMG proxy</string>
   <string name="diagnostic_blink">Blinks and transients</string>
   <string name="diagnostic_stall">Packet stalls</string>
-  <string name="diagnostic_total">Total artefact score</string>
+  <string name="diagnostic_total">Total artefact score (excludes 50Hz line noise)</string>
   <string name="esense_line">eSense Attention: %1$d   eSense Meditation: %2$d</string>
 
   <string name="section_feedback_source">Feedback source</string>
   <string name="invert_reward">Invert reward (louder means better)</string>
   <string name="artefacts_reduce_score">Artefacts reduce Samatha Score</string>
   <string name="crackle_overlay">Crackle overlay (independent)</string>
+  <string name="crackle_helper">Adds short crackling bursts from artefact score so movement/contact noise is audible separately from base feedback.</string>
   <string name="gamma_value">Sensitivity (gamma): %1$.2f</string>
+  <string name="gamma_helper">Gamma controls response curve sensitivity: higher gamma is gentler near good states and more pronounced near poor states.</string>
   <string name="base_noise_range">Base noise range (dB): min %1$d  max %2$d</string>
   <string name="base_noise_min">Minimum (quiet)</string>
   <string name="base_noise_max">Maximum (loud)</string>
@@ -88,7 +98,9 @@
   <string name="learn_samatha_title">Samatha in Theravada context</string>
   <string name="learn_samatha_body">In Theravada practice, samatha refers to calm collectedness developed through steady attention and reduced agitation. It supports stability and clarity but is not identical to full liberating insight on its own.</string>
   <string name="learn_score_title">Samatha Score in this app</string>
-  <string name="learn_score_body">Samatha Score is a training proxy. It combines normalized Relaxed Alertness Index (alpha relative to high-frequency activity) with an optional artefact penalty for movement, contact instability, line noise, and stalls.</string>
+  <string name="learn_score_body">Samatha Score is a training proxy. It combines normalized Relaxed Alertness Index with an optional artefact penalty for movement, contact instability, EMG proxy, blink/transient activity, and stalls.</string>
+  <string name="learn_metric_difference_title">Samatha Score vs Relaxed Alertness Index</string>
+  <string name="learn_metric_difference_body">Relaxed Alertness Index is the normalized EEG index (alpha versus high-frequency activity). Samatha Score starts from that index and then optionally applies artefact penalty. If artefact penalty is off, the two are effectively the same signal.</string>
   <string name="learn_caveat_title">Interpretation limits</string>
   <string name="learn_caveat_body">This score is not a direct measure of meditative attainment. It is a practical biofeedback estimate based on one dry frontal electrode and should be interpreted as a session aid, not as doctrinal validation.</string>
   <string name="learn_wellbeing_title">Wellbeing note</string>
