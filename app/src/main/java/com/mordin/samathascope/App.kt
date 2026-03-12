@@ -24,7 +24,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.matchParentSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.weight
@@ -1119,7 +1118,7 @@ private fun LanternScene(altitude: Float, glow: Float) {
   ) {
     Canvas(
       modifier = Modifier
-        .matchParentSize()
+        .fillMaxSize()
         .padding(8.dp)
     ) {
       val w = size.width
