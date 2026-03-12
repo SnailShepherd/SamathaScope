@@ -21,21 +21,21 @@ class AppUiTest {
   }
 
   @Test
-  fun learnTab_showsSamathaCard() {
+  fun learnTab_showsUpdatedClassifierCard() {
     composeRule.onNodeWithText("Learn").performClick()
-    composeRule.onNodeWithText("Samatha in Theravada context").assertExists()
+    composeRule.onNodeWithText("Frontal-state feedback proxy").assertExists()
   }
 
   @Test
   fun dashboardLivePlotSelection_staysSyncedAcrossTabs() {
     composeRule.onNodeWithText("Dashboard").performClick()
-    composeRule.onNodeWithText("Relaxed Alertness Index").performClick()
-    composeRule.onNodeWithText("Showing: Relaxed Alertness Index").assertExists()
+    composeRule.onNodeWithText("Meditation Proxy").performClick()
+    composeRule.onNodeWithText("Showing: Meditation Proxy").assertExists()
 
     composeRule.onNodeWithText("Signals").performClick()
     composeRule.onNodeWithText("Dashboard").performClick()
 
-    composeRule.onNodeWithText("Showing: Relaxed Alertness Index").assertExists()
+    composeRule.onNodeWithText("Showing: Meditation Proxy").assertExists()
   }
 
   @Test

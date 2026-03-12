@@ -11,7 +11,7 @@ import kotlin.random.Random
  * White-noise neurofeedback audio engine (v0.1).
  *
  * Output:
- * - Stereo base white noise (gain driven by training score S)
+ * - Stereo base white noise (gain driven by feedback value)
  * - Independent "crackle" overlay (intensity driven by artefact score A)
  *
  * Design choices (why this way):
@@ -32,7 +32,7 @@ class NoiseAudioEngine(
   @Volatile private var muted = true
 
   // Target params (updated from UI thread)
-  @Volatile private var targetS: Float = 0f
+  @Volatile private var targetFeedback: Float = 0f
   @Volatile private var targetA: Float = 0f
   @Volatile private var invertReward: Boolean = false
   @Volatile private var gamma: Float = 1.6f
@@ -111,7 +111,7 @@ class NoiseAudioEngine(
   }
 
   fun update(
-    scoreS: Float,
+    feedbackValue: Float,
     artefactA: Float,
     invertReward: Boolean,
     gamma: Float,
@@ -120,7 +120,7 @@ class NoiseAudioEngine(
     crackleEnabled: Boolean,
     crackleIntensity: Float
   ) {
-    this.targetS = scoreS.coerceIn(0f, 1f)
+    this.targetFeedback = feedbackValue.coerceIn(0f, 1f)
     this.targetA = artefactA.coerceIn(0f, 1f)
     this.invertReward = invertReward
     this.gamma = gamma.coerceIn(0.6f, 3.0f)
@@ -137,8 +137,8 @@ class NoiseAudioEngine(
     val dt = frameSize.toFloat() / sampleRate.toFloat()
 
     while (running) {
-      // Base gain target from score S (0..1) → dB.
-      val s = targetS
+      // Base gain target from the smoothed feedback value (0..1) → dB.
+      val s = targetFeedback
       val mapped = if (!invertReward) (1f - s).coerceIn(0f, 1f) else s
       val shaped = mapped.pow(gamma)
       val gDb = gMinDb + shaped * (gMaxDb - gMinDb)

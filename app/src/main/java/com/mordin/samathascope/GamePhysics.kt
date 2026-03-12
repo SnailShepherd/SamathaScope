@@ -1,4 +1,4 @@
-﻿package com.mordin.samathascope
+package com.mordin.samathascope
 
 data class LevitationState(
   val altitude: Float,
@@ -14,10 +14,18 @@ object GamePhysics {
     damping: Float = 4.5f,
   ): LevitationState {
     val clampedTarget = target.coerceIn(0f, 1f)
-    val safeDt = dtSeconds.coerceIn(0f, 0.1f)
-    val acceleration = stiffness * (clampedTarget - state.altitude) - damping * state.velocity
-    val velocity = state.velocity + acceleration * safeDt
-    val altitude = (state.altitude + velocity * safeDt).coerceIn(0f, 1f)
+    var remaining = dtSeconds.coerceIn(0f, 1.0f)
+    var altitude = state.altitude
+    var velocity = state.velocity
+
+    while (remaining > 0f) {
+      val dt = remaining.coerceAtMost(0.1f)
+      val acceleration = stiffness * (clampedTarget - altitude) - damping * velocity
+      velocity += acceleration * dt
+      altitude = (altitude + velocity * dt).coerceIn(0f, 1f)
+      remaining -= dt
+    }
+
     return LevitationState(altitude = altitude, velocity = velocity)
   }
 

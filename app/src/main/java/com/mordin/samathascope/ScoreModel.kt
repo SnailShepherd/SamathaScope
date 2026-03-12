@@ -1,119 +1,198 @@
 package com.mordin.samathascope
 
-/**
- * Artefact breakdown used both for:
- * - audio crackle intensity (A)
- * - diagnostics UI (separate bars)
- */
-data class ArtefactBreakdown(
+import kotlin.math.exp
+
+enum class StateLabel {
+  SIGNAL_CONTAMINATED,
+  DROWSY,
+  SETTLED,
+  EFFORTFUL_FOCUS,
+  MIND_WANDERING,
+  UNCERTAIN,
+}
+
+data class QualityMetrics(
+  val poorSignal: Int,
   val contact: Float,
-  val line: Float,
+  val lineNoise: Float,
   val emg: Float,
   val blink: Float,
+  val clip: Float,
   val stall: Float,
-  val totalA: Float,
-  val stallMs: Long,
+  val artefactScore: Float,
+  val qualityConfidence: Float,
+  val hfRatio: Float,
+  val blinkRateHz: Float,
+  val clipFraction: Float,
+  val maxGapMs: Long,
+  val isContaminated: Boolean,
+  val isCalibrationClean: Boolean,
 )
 
-/**
- * Turns raw-derived features into:
- * - artefact score A in [0, 1]
- * - training score S in [0, 1]
- *
- * Design goal: be robust on a single dry frontal electrode.
- * That means we treat high-frequency power (20-45 Hz) mostly as muscle/EMG contamination,
- * and we explicitly penalise it.
- */
+data class FeatureZScores(
+  val logBeta: Float,
+  val tbr: Float,
+  val tar: Float,
+  val abr: Float,
+  val entropy: Float,
+  val emg: Float,
+) {
+  companion object {
+    fun zero(): FeatureZScores = FeatureZScores(0f, 0f, 0f, 0f, 0f, 0f)
+  }
+}
+
+data class StateProbabilities(
+  val contaminated: Float,
+  val drowsy: Float,
+  val settled: Float,
+  val effortfulFocus: Float,
+  val mindWandering: Float,
+  val uncertain: Float,
+) {
+  fun valueFor(label: StateLabel): Float {
+    return when (label) {
+      StateLabel.SIGNAL_CONTAMINATED -> contaminated
+      StateLabel.DROWSY -> drowsy
+      StateLabel.SETTLED -> settled
+      StateLabel.EFFORTFUL_FOCUS -> effortfulFocus
+      StateLabel.MIND_WANDERING -> mindWandering
+      StateLabel.UNCERTAIN -> uncertain
+    }
+  }
+}
+
+data class ClassifierOutput(
+  val rawStateLabel: StateLabel,
+  val quality: QualityMetrics,
+  val zScores: FeatureZScores,
+  val probabilities: StateProbabilities,
+  val drowsyScore: Float,
+  val settledScore: Float,
+  val effortfulFocusScore: Float,
+  val mindWanderingScore: Float,
+  val alertness: Float,
+  val control: Float,
+  val settledness: Float,
+  val qualityConfidence: Float,
+  val meditationProxy: Float,
+)
+
 class ScoreModel {
+  private var calibration: Calibration? = null
 
-  /**
-   * Calibration stores percentiles for normalising RAI to [0,1] for your baseline.
-   *
-   * Why percentiles (P10/P90) instead of mean/std?
-   * - percentiles are less fragile with weird outliers (blinks, contact glitches)
-   * - you do not need to assume any distribution
-   */
-  private var cal: Calibration? = null
-
-  fun reset() { cal = null }
-
-  fun setCalibration(c: Calibration) { cal = c }
-
-  /**
-   * Normalise RAI into [0,1] using calibration percentiles.
-   * If calibration is missing, returns 0.5 (neutral).
-   */
-  fun normaliseRai(rai: Float): Float {
-    val c = cal ?: return 0.5f
-    return ((rai - c.raiP10) / (c.raiP90 - c.raiP10)).coerceIn(0f, 1f)
+  fun reset() {
+    calibration = null
   }
 
-  /**
-   * Compute artefact score A in [0,1].
-   *
-   * Components:
-   * - contact telemetry (PoorSignal): is the electrode connected?
-   * - line noise around 50 Hz (diagnostics only)
-   * - EMG proxy: fraction of 20-45 Hz power in total 1-45 Hz (jaw/forehead tension)
-   * - blink/transient proxy: derivative spikes
-   * - packet stalls: Bluetooth hiccups
-   *
-   * Weighting in totalA:
-   * - contact 0.40
-   * - emg 0.30
-   * - blink 0.20
-   * - stall 0.10
-   */
-  fun artefacts(poorSignal: Int, features: EegFeatures, stallMs: Long): ArtefactBreakdown {
-    // PoorSignal is 0 good, higher means worse. NeuroSky uses 0..255.
-    val contact = (poorSignal / 200f).coerceIn(0f, 1f)
+  fun setCalibration(calibration: Calibration) {
+    this.calibration = calibration
+  }
 
-    // 50 Hz line noise ratio relative to 1-45 Hz power (diagnostics only).
-    val line = (features.line50 / (features.total145 + 1e-6f)).coerceIn(0f, 1f) * 3f
-    val lineC = line.coerceIn(0f, 1f)
+  fun quality(poorSignal: Int, features: EegFeatures): QualityMetrics {
+    val contact = clamp01(poorSignal / 50f)
+    val line = clamp01(features.lineNoiseRatio * 5f)
+    val emg = clamp01((features.hfRatio - 0.10f) / 0.25f)
+    val blink = clamp01(features.blinkRateHz / 1.0f)
+    val clip = clamp01(features.clipFraction / 0.01f)
+    val stall = clamp01(features.maxGapMs / 500f)
+    val artefactScore = clamp01(
+      (0.30f * contact) +
+        (0.25f * emg) +
+        (0.20f * blink) +
+        (0.15f * clip) +
+        (0.10f * stall)
+    )
+    val isContaminated = poorSignal > 25 ||
+      features.clipFraction >= 0.01f ||
+      features.maxGapMs >= 150L ||
+      features.blinkRateHz >= 0.75f ||
+      features.hfRatio >= 0.35f ||
+      artefactScore > 0.45f
+    val isCalibrationClean = !isContaminated &&
+      poorSignal <= 25 &&
+      features.hfRatio < 0.25f &&
+      features.blinkRateHz < 0.30f &&
+      features.clipFraction < 0.005f &&
+      features.maxGapMs < 100L &&
+      artefactScore <= 0.30f
 
-    // EMG proxy already in [0,1] (20-45 / 1-45).
-    val emg = features.emgFrac.coerceIn(0f, 1f)
-
-    // Blink/transient proxy already [0,1].
-    val blink = features.blinkScore.coerceIn(0f, 1f)
-
-    // Stall: map 0..500ms to 0..1 (stalls are audible and should be obvious).
-    val stall = (stallMs / 500f).coerceIn(0f, 1f)
-
-    val total = (
-      0.40f * contact +
-      0.30f * emg +
-      0.20f * blink +
-      0.10f * stall
-    ).coerceIn(0f, 1f)
-
-    return ArtefactBreakdown(
+    return QualityMetrics(
+      poorSignal = poorSignal,
       contact = contact,
-      line = lineC,
+      lineNoise = line,
       emg = emg,
       blink = blink,
+      clip = clip,
       stall = stall,
-      totalA = total,
-      stallMs = stallMs
+      artefactScore = artefactScore,
+      qualityConfidence = clamp01(1f - artefactScore),
+      hfRatio = features.hfRatio,
+      blinkRateHz = features.blinkRateHz,
+      clipFraction = features.clipFraction,
+      maxGapMs = features.maxGapMs,
+      isContaminated = isContaminated,
+      isCalibrationClean = isCalibrationClean,
     )
   }
 
-  /**
-   * Training score S in [0,1].
-   *
-   * Base is normalised RAI:
-   *   RAI = ln(alpha(8-12) / hi(20-45))
-   *
-   * Then we optionally apply an artefact penalty.
-   */
-  fun scoreS(rai: Float, artefactA: Float, artefactsReduceScore: Boolean): Float {
-    var s = normaliseRai(rai)
+  fun zScores(features: EegFeatures): FeatureZScores {
+    return calibration?.zScores(features) ?: FeatureZScores.zero()
+  }
 
-    if (artefactsReduceScore) {
-      // Keep some gradient so feedback does not die completely at high artefact.
-      s *= (1f - 0.7f * artefactA).coerceIn(0.05f, 1f)
+  fun classify(poorSignal: Int, features: EegFeatures): ClassifierOutput {
+    val quality = quality(poorSignal = poorSignal, features = features)
+    val z = zScores(features)
+
+    val d = sigmoid((1.3f * z.tar) + (0.9f * z.tbr) - (0.7f * z.entropy) - (0.4f * z.abr))
+    val m = sigmoid((1.0f * z.abr) - (0.6f * z.tar) + (0.4f * z.entropy) - (0.3f * z.emg))
+    val f = sigmoid((-0.9f * z.abr) - (0.7f * z.tbr) + (0.4f * z.logBeta) - (0.2f * z.entropy))
+    val w = sigmoid((0.9f * z.tbr) - (0.4f * z.abr) - (0.2f * z.entropy))
+
+    val cleanProbabilities = StateProbabilities(
+      contaminated = if (quality.isContaminated) 1f else quality.artefactScore,
+      drowsy = if (quality.isContaminated) 0f else d,
+      settled = if (quality.isContaminated || d > 0.65f) 0f else m,
+      effortfulFocus = if (quality.isContaminated || d > 0.65f) 0f else f,
+      mindWandering = if (quality.isContaminated || d > 0.65f) 0f else w,
+      uncertain = if (quality.isContaminated || d > 0.65f) 0f else 1f - ((maxOf(m, f, w) / 0.55f).coerceIn(0f, 1f)),
+    )
+
+    val rawStateLabel = when {
+      quality.isContaminated -> StateLabel.SIGNAL_CONTAMINATED
+      d > 0.65f -> StateLabel.DROWSY
+      m >= f && m >= w && m > 0.55f -> StateLabel.SETTLED
+      f >= m && f >= w && f > 0.55f -> StateLabel.EFFORTFUL_FOCUS
+      w > 0.55f -> StateLabel.MIND_WANDERING
+      else -> StateLabel.UNCERTAIN
     }
-    return s.coerceIn(0f, 1f)
+
+    val alertness = clamp01(1f - d)
+    val control = sigmoid(-z.tbr)
+    // Settledness aims for relaxed-but-awake balance rather than theta-heavy drowsiness.
+    val settledness = sigmoid(z.abr - (0.5f * z.tar))
+    val meditationProxy = clamp01(settledness * alertness * quality.qualityConfidence)
+
+    return ClassifierOutput(
+      rawStateLabel = rawStateLabel,
+      quality = quality,
+      zScores = z,
+      probabilities = cleanProbabilities,
+      drowsyScore = d,
+      settledScore = m,
+      effortfulFocusScore = f,
+      mindWanderingScore = w,
+      alertness = alertness,
+      control = control,
+      settledness = settledness,
+      qualityConfidence = quality.qualityConfidence,
+      meditationProxy = meditationProxy,
+    )
+  }
+
+  private fun clamp01(value: Float): Float = value.coerceIn(0f, 1f)
+
+  private fun sigmoid(x: Float): Float {
+    return (1f / (1f + exp(-x.toDouble()))).toFloat()
   }
 }

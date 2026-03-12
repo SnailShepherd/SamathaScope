@@ -1,33 +1,64 @@
 package com.mordin.samathascope
 
-/**
- * Fixed-size moving average with O(1) updates.
- */
-class RollingAverage(
-  private val capacity: Int,
+class ExponentialSmoother(
+  private val alpha: Float,
 ) {
-  private val values = ArrayDeque<Float>(capacity.coerceAtLeast(1))
-  private var sum = 0.0
+  private var currentValue: Float? = null
 
   fun reset() {
-    values.clear()
-    sum = 0.0
+    currentValue = null
   }
 
   fun add(value: Float): Float {
-    if (values.size >= capacity) {
-      sum -= values.removeFirst()
+    val previous = currentValue
+    currentValue = if (previous == null) {
+      value
+    } else {
+      (alpha * value) + ((1f - alpha) * previous)
     }
-    values.addLast(value)
-    sum += value
-    return average()
+    return currentValue ?: value
   }
 
-  fun average(): Float {
-    if (values.isEmpty()) return 0f
-    return (sum / values.size.toDouble()).toFloat()
-  }
-
-  fun size(): Int = values.size
+  fun current(): Float? = currentValue
 }
 
+class StateHoldSmoother(
+  private val requiredWins: Int = 3,
+  private val immediateThreshold: Float = 0.70f,
+  initialState: StateLabel = StateLabel.UNCERTAIN,
+) {
+  private var displayedState = initialState
+  private var pendingState = initialState
+  private var pendingWins = 0
+
+  fun reset(state: StateLabel = StateLabel.UNCERTAIN) {
+    displayedState = state
+    pendingState = state
+    pendingWins = 0
+  }
+
+  fun update(candidate: StateLabel, confidence: Float): StateLabel {
+    if (candidate == displayedState) {
+      pendingState = candidate
+      pendingWins = 0
+      return displayedState
+    }
+    if (confidence >= immediateThreshold) {
+      displayedState = candidate
+      pendingState = candidate
+      pendingWins = 0
+      return displayedState
+    }
+    if (candidate == pendingState) {
+      pendingWins++
+    } else {
+      pendingState = candidate
+      pendingWins = 1
+    }
+    if (pendingWins >= requiredWins) {
+      displayedState = candidate
+      pendingWins = 0
+    }
+    return displayedState
+  }
+}

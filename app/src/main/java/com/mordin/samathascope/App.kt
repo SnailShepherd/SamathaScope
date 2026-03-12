@@ -8,21 +8,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -140,7 +126,6 @@ private fun MainScreen(vm: MainViewModel) {
           onFeedbackMetricChange = vm::setFeedbackMetric,
           onPlotTypeChange = vm::setPlotType,
           onInvertRewardChange = vm::setInvertReward,
-          onArtefactsReduceChange = vm::setArtefactsReduceScore,
           onCrackleEnabledChange = vm::setCrackleEnabled,
           onGammaChange = vm::setGamma,
           onGMinDbChange = vm::setGMinDb,
@@ -167,6 +152,7 @@ private fun MainScreen(vm: MainViewModel) {
         SettingsSheet(
           ui = ui,
           onRecordingChange = vm::setRecordingEnabled,
+          onNotch50Change = vm::setNotch50Enabled,
           onClose = { vm.setSettingsPanelVisible(false) },
           onTestBeep = vm::testBeep,
         )
@@ -353,7 +339,7 @@ private fun SessionSection(
     Box(
       modifier = Modifier
         .fillMaxWidth()
-        .heightIn(min = 100.dp)
+        .heightIn(min = 120.dp)
     ) {
       if (ui.calibrating) {
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -370,8 +356,9 @@ private fun SessionSection(
       } else if (ui.sessionRunning) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
           HudRow(label = stringResource(R.string.session_elapsed_label), value = "${ui.sessionElapsedSec}s")
-          HudRow(label = stringResource(R.string.session_avg_samatha_label), value = "${(ui.avgSamathaScore * 100).roundToInt()}%")
-          HudRow(label = stringResource(R.string.session_over_80_label), value = "${ui.timeSamathaOver80Seconds}s")
+          HudRow(label = stringResource(R.string.session_state_label), value = stateLabelLabel(ui.displayedStateLabel))
+          HudRow(label = stringResource(R.string.session_avg_proxy_label), value = "${(ui.avgMeditationProxy * 100).roundToInt()}%")
+          HudRow(label = stringResource(R.string.session_over_80_label), value = "${ui.timeMeditationProxyOver80Seconds}s")
         }
       } else {
         Text(stringResource(R.string.idle_status), style = MaterialTheme.typography.bodySmall)
@@ -388,9 +375,15 @@ private fun DashboardLivePlotSection(
   val plotTypes = remember {
     listOf(
       PlotType.RAW,
-      PlotType.SAMATHA_SCORE,
+      PlotType.MEDITATION_PROXY,
+      PlotType.SETTLEDNESS,
+      PlotType.CONTROL,
+      PlotType.ALERTNESS,
+      PlotType.DROWSY_SCORE,
       PlotType.ARTEFACT_SCORE,
-      PlotType.RELAXED_ALERTNESS_INDEX,
+      PlotType.QUALITY_CONFIDENCE,
+      PlotType.EFFORTFUL_FOCUS_SCORE,
+      PlotType.MIND_WANDERING_SCORE,
       PlotType.ESENSE_MEDITATION,
       PlotType.ESENSE_ATTENTION,
     )
@@ -443,13 +436,21 @@ private fun DiagnosticsSection(ui: UiState) {
   Panel {
     Text(stringResource(R.string.section_diagnostics), fontWeight = FontWeight.SemiBold)
     Spacer(Modifier.height(8.dp))
-    ArtefactBar(stringResource(R.string.diagnostic_contact), ui.artefactContact)
-    ArtefactBar(stringResource(R.string.diagnostic_line), ui.artefactLine)
-    ArtefactBar(stringResource(R.string.diagnostic_emg), ui.artefactEmg)
-    ArtefactBar(stringResource(R.string.diagnostic_blink), ui.artefactBlink)
-    ArtefactBar(stringResource(R.string.diagnostic_stall), ui.artefactStall)
+    HudRow(label = stringResource(R.string.state_label), value = stateLabelLabel(ui.displayedStateLabel))
+    MetricBar(stringResource(R.string.metric_settledness), ui.settledness)
+    MetricBar(stringResource(R.string.metric_control), ui.control)
+    MetricBar(stringResource(R.string.metric_alertness), ui.alertness)
+    MetricBar(stringResource(R.string.metric_drowsy_score), ui.drowsyScore)
+    MetricBar(stringResource(R.string.metric_quality_confidence), ui.qualityConfidence)
     Spacer(Modifier.height(8.dp))
-    ArtefactBar(stringResource(R.string.diagnostic_total), ui.artefactScore, emphasise = true)
+    MetricBar(stringResource(R.string.diagnostic_contact), ui.artefactContact)
+    MetricBar(stringResource(R.string.diagnostic_line), ui.artefactLine)
+    MetricBar(stringResource(R.string.diagnostic_emg), ui.artefactEmg)
+    MetricBar(stringResource(R.string.diagnostic_blink), ui.artefactBlink)
+    MetricBar(stringResource(R.string.diagnostic_clip), ui.artefactClip)
+    MetricBar(stringResource(R.string.diagnostic_stall), ui.artefactStall)
+    Spacer(Modifier.height(8.dp))
+    MetricBar(stringResource(R.string.diagnostic_total), ui.artefactScore, emphasise = true)
     Spacer(Modifier.height(8.dp))
     ValueText(
       stringResource(
@@ -467,7 +468,6 @@ private fun SignalsTab(
   onFeedbackMetricChange: (PlotType) -> Unit,
   onPlotTypeChange: (PlotType) -> Unit,
   onInvertRewardChange: (Boolean) -> Unit,
-  onArtefactsReduceChange: (Boolean) -> Unit,
   onCrackleEnabledChange: (Boolean) -> Unit,
   onGammaChange: (Float) -> Unit,
   onGMinDbChange: (Int) -> Unit,
@@ -481,20 +481,27 @@ private fun SignalsTab(
 ) {
   val metricTypes = remember {
     listOf(
-      PlotType.SAMATHA_SCORE,
-      PlotType.ESENSE_MEDITATION,
-      PlotType.ESENSE_ATTENTION,
-      PlotType.ARTEFACT_SCORE,
-      PlotType.RELAXED_ALERTNESS_INDEX,
+      PlotType.MEDITATION_PROXY,
+      PlotType.SETTLEDNESS,
+      PlotType.CONTROL,
+      PlotType.ALERTNESS,
+      PlotType.QUALITY_CONFIDENCE,
+      PlotType.EFFORTFUL_FOCUS_SCORE,
     )
   }
 
   val plotTypes = remember {
     listOf(
       PlotType.RAW,
-      PlotType.SAMATHA_SCORE,
+      PlotType.MEDITATION_PROXY,
+      PlotType.SETTLEDNESS,
+      PlotType.CONTROL,
+      PlotType.ALERTNESS,
+      PlotType.DROWSY_SCORE,
       PlotType.ARTEFACT_SCORE,
-      PlotType.RELAXED_ALERTNESS_INDEX,
+      PlotType.QUALITY_CONFIDENCE,
+      PlotType.EFFORTFUL_FOCUS_SCORE,
+      PlotType.MIND_WANDERING_SCORE,
       PlotType.ESENSE_MEDITATION,
       PlotType.ESENSE_ATTENTION,
     )
@@ -519,16 +526,17 @@ private fun SignalsTab(
       )
 
       Spacer(Modifier.height(10.dp))
+      HudRow(label = stringResource(R.string.state_label), value = stateLabelLabel(ui.displayedStateLabel))
+      HudRow(label = stringResource(R.string.metric_settledness), value = "${(ui.settledness * 100).roundToInt()}%")
+      HudRow(label = stringResource(R.string.metric_alertness), value = "${(ui.alertness * 100).roundToInt()}%")
+      HudRow(label = stringResource(R.string.metric_quality_confidence), value = "${(ui.qualityConfidence * 100).roundToInt()}%")
+
+      Spacer(Modifier.height(10.dp))
 
       LabeledCheckbox(
         checked = ui.invertReward,
         label = stringResource(R.string.invert_reward),
         onCheckedChange = onInvertRewardChange,
-      )
-      LabeledCheckbox(
-        checked = ui.artefactsReduceScore,
-        label = stringResource(R.string.artefacts_reduce_score),
-        onCheckedChange = onArtefactsReduceChange,
       )
       LabeledCheckbox(
         checked = ui.crackleEnabled,
@@ -616,11 +624,12 @@ private fun GameTab(
 ) {
   val gameMetrics = remember {
     listOf(
-      PlotType.SAMATHA_SCORE,
-      PlotType.ESENSE_MEDITATION,
-      PlotType.ESENSE_ATTENTION,
-      PlotType.ARTEFACT_SCORE,
-      PlotType.RELAXED_ALERTNESS_INDEX,
+      PlotType.MEDITATION_PROXY,
+      PlotType.SETTLEDNESS,
+      PlotType.CONTROL,
+      PlotType.ALERTNESS,
+      PlotType.QUALITY_CONFIDENCE,
+      PlotType.EFFORTFUL_FOCUS_SCORE,
     )
   }
 
@@ -658,6 +667,7 @@ private fun GameTab(
 
       HudRow(label = stringResource(R.string.game_hud_metric), value = "${ui.gameHudState.metricValuePercent}%")
       HudRow(label = stringResource(R.string.game_hud_artefact), value = "${ui.gameHudState.artefactPercent}%")
+      HudRow(label = stringResource(R.string.game_hud_state), value = stateLabelLabel(ui.gameHudState.stateLabel))
       HudRow(label = stringResource(R.string.game_hud_signal), value = "${ui.gameHudState.poorSignal}")
       HudRow(label = stringResource(R.string.game_hud_elapsed), value = "${ui.gameHudState.elapsedSeconds}s")
       if (shouldShowBatteryRow(ui.gameHudState.batteryPercent)) {
@@ -736,6 +746,7 @@ private fun LearnCard(title: String, body: String) {
 private fun SettingsSheet(
   ui: UiState,
   onRecordingChange: (Boolean) -> Unit,
+  onNotch50Change: (Boolean) -> Unit,
   onClose: () -> Unit,
   onTestBeep: () -> Unit,
 ) {
@@ -747,6 +758,12 @@ private fun SettingsSheet(
       label = stringResource(R.string.record_local),
       onCheckedChange = onRecordingChange,
     )
+    LabeledCheckbox(
+      checked = ui.notch50Enabled,
+      label = stringResource(R.string.notch_50_enabled),
+      onCheckedChange = onNotch50Change,
+    )
+    Text(stringResource(R.string.notch_50_helper), style = MaterialTheme.typography.bodySmall)
     ui.lastRecordingPath?.let {
       Text(stringResource(R.string.saved_under, it), style = MaterialTheme.typography.bodySmall)
     }
@@ -984,9 +1001,15 @@ private fun ChoiceRow(
 private fun plotTypeLabel(type: PlotType): String {
   return when (type) {
     PlotType.RAW -> stringResource(R.string.plot_raw)
-    PlotType.SAMATHA_SCORE -> stringResource(R.string.plot_samatha_score)
+    PlotType.MEDITATION_PROXY -> stringResource(R.string.plot_meditation_proxy)
+    PlotType.SETTLEDNESS -> stringResource(R.string.plot_settledness)
+    PlotType.CONTROL -> stringResource(R.string.plot_control)
+    PlotType.ALERTNESS -> stringResource(R.string.plot_alertness)
+    PlotType.DROWSY_SCORE -> stringResource(R.string.plot_drowsy_score)
     PlotType.ARTEFACT_SCORE -> stringResource(R.string.plot_artefact_score)
-    PlotType.RELAXED_ALERTNESS_INDEX -> stringResource(R.string.plot_relaxed_alertness)
+    PlotType.QUALITY_CONFIDENCE -> stringResource(R.string.plot_quality_confidence)
+    PlotType.EFFORTFUL_FOCUS_SCORE -> stringResource(R.string.plot_effortful_focus)
+    PlotType.MIND_WANDERING_SCORE -> stringResource(R.string.plot_mind_wandering)
     PlotType.ESENSE_MEDITATION -> stringResource(R.string.plot_esense_meditation)
     PlotType.ESENSE_ATTENTION -> stringResource(R.string.plot_esense_attention)
   }
@@ -1071,7 +1094,19 @@ private fun WindowSecondsDropdown(
 }
 
 @Composable
-private fun ArtefactBar(label: String, value: Float, emphasise: Boolean = false) {
+private fun stateLabelLabel(state: StateLabel): String {
+  return when (state) {
+    StateLabel.SIGNAL_CONTAMINATED -> stringResource(R.string.state_signal_contaminated)
+    StateLabel.DROWSY -> stringResource(R.string.state_drowsy)
+    StateLabel.SETTLED -> stringResource(R.string.state_settled)
+    StateLabel.EFFORTFUL_FOCUS -> stringResource(R.string.state_effortful_focus)
+    StateLabel.MIND_WANDERING -> stringResource(R.string.state_mind_wandering)
+    StateLabel.UNCERTAIN -> stringResource(R.string.state_uncertain)
+  }
+}
+
+@Composable
+private fun MetricBar(label: String, value: Float, emphasise: Boolean = false) {
   Column {
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
       Text(

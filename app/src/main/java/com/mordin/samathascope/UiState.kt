@@ -1,10 +1,16 @@
-﻿package com.mordin.samathascope
+package com.mordin.samathascope
 
 enum class PlotType {
   RAW,
-  SAMATHA_SCORE,
+  MEDITATION_PROXY,
+  SETTLEDNESS,
+  CONTROL,
+  ALERTNESS,
+  DROWSY_SCORE,
   ARTEFACT_SCORE,
-  RELAXED_ALERTNESS_INDEX,
+  QUALITY_CONFIDENCE,
+  EFFORTFUL_FOCUS_SCORE,
+  MIND_WANDERING_SCORE,
   ESENSE_MEDITATION,
   ESENSE_ATTENTION,
 }
@@ -29,7 +35,7 @@ data class BondedDevice(
 )
 
 data class GameState(
-  val metric: PlotType = PlotType.SAMATHA_SCORE,
+  val metric: PlotType = PlotType.MEDITATION_PROXY,
   val altitude: Float = 0.5f,
   val velocity: Float = 0f,
 )
@@ -40,6 +46,7 @@ data class GameHudState(
   val poorSignal: Int = 255,
   val elapsedSeconds: Int = 0,
   val batteryPercent: Int? = null,
+  val stateLabel: StateLabel = StateLabel.UNCERTAIN,
 )
 
 data class UiState(
@@ -70,28 +77,36 @@ data class UiState(
   val calibrationRemainingSec: Int = 0,
   val sessionElapsedSec: Int = 0,
 
-  val relaxedAlertnessIndex: Float = 0f,
-  val samathaScore: Float = 0f,
+  val meditationProxy: Float = 0f,
+  val settledness: Float = 0f,
+  val control: Float = 0f,
+  val alertness: Float = 0f,
+  val drowsyScore: Float = 0f,
   val artefactScore: Float = 0f,
+  val qualityConfidence: Float = 0f,
+  val mindWanderingScore: Float = 0f,
+  val effortfulFocusScore: Float = 0f,
+  val displayedStateLabel: StateLabel = StateLabel.UNCERTAIN,
 
-  val avgSamathaScore: Float = 0f,
-  val timeSamathaOver80Seconds: Int = 0,
+  val avgMeditationProxy: Float = 0f,
+  val timeMeditationProxyOver80Seconds: Int = 0,
 
   val artefactContact: Float = 0f,
   val artefactLine: Float = 0f,
   val artefactEmg: Float = 0f,
   val artefactBlink: Float = 0f,
+  val artefactClip: Float = 0f,
   val artefactStall: Float = 0f,
 
-  val feedbackMetric: PlotType = PlotType.SAMATHA_SCORE,
+  val feedbackMetric: PlotType = PlotType.MEDITATION_PROXY,
 
   val invertReward: Boolean = false,
-  val artefactsReduceScore: Boolean = true,
   val crackleEnabled: Boolean = true,
   val gamma: Float = 1.6f,
   val gMinDb: Int = -30,
   val gMaxDb: Int = -3,
   val crackleIntensity: Float = 0.6f,
+  val notch50Enabled: Boolean = false,
 
   val audioRunning: Boolean = false,
   val audioMuted: Boolean = true,
@@ -109,19 +124,25 @@ fun defaultPlotSettings(): Map<PlotType, PlotSettings> {
     windowSeconds = 5,
     yMin = -1200f,
     yMax = 1200f,
-    isUserLocked = false
+    isUserLocked = false,
   )
   val defaultMetric = PlotSettings(
     windowSeconds = 300,
     yMin = 0f,
     yMax = 100f,
-    isUserLocked = false
+    isUserLocked = false,
   )
   return mapOf(
     PlotType.RAW to defaultRaw,
-    PlotType.SAMATHA_SCORE to defaultMetric,
+    PlotType.MEDITATION_PROXY to defaultMetric,
+    PlotType.SETTLEDNESS to defaultMetric,
+    PlotType.CONTROL to defaultMetric,
+    PlotType.ALERTNESS to defaultMetric,
+    PlotType.DROWSY_SCORE to defaultMetric,
     PlotType.ARTEFACT_SCORE to defaultMetric,
-    PlotType.RELAXED_ALERTNESS_INDEX to defaultMetric,
+    PlotType.QUALITY_CONFIDENCE to defaultMetric,
+    PlotType.EFFORTFUL_FOCUS_SCORE to defaultMetric,
+    PlotType.MIND_WANDERING_SCORE to defaultMetric,
     PlotType.ESENSE_MEDITATION to defaultMetric,
     PlotType.ESENSE_ATTENTION to defaultMetric,
   )

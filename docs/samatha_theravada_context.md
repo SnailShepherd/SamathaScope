@@ -1,15 +1,19 @@
-﻿# Samatha in Theravada Context
+# Samatha in Theravada Context
 
 ## Practical framing
-In Theravada usage, `samatha` refers to calming and stabilizing the mind. It is cultivated through steady attention, reduced agitation, and repeated settling.
+In Theravada usage, `samatha` refers to calming and stabilizing the mind. It is cultivated through steadiness, reduced agitation, and repeated settling.
 
 ## How this app uses the term
 SamathaScope uses the term in a practical training sense:
-- It tracks patterns that are often associated with relaxed stability.
-- It does not claim to measure canonical attainment or meditative depth directly.
+- It rewards a frontal pattern that is interpreted as more settled, alert, and controlled.
+- It explicitly tries not to confuse drowsiness with useful meditation feedback.
+- It treats the computed metrics as training proxies, not direct measures of canonical attainment.
 
 ## Important caveat
-A computed score is a proxy signal for feedback. It can support training consistency, but it is not a spiritual certification.
+The feedback model is a personalised frontal-state classifier built from one dry FP1 electrode with an ear reference. It can support training consistency, but it is not a spiritual certification, a medical tool, or a whole-brain measurement.
+
+## Why the app distinguishes drowsiness
+Traditional practice does not treat dullness or torpor as the same thing as collectedness. The app follows that distinction by fading reward down when the signal looks sleepy, even if the data are otherwise quiet.
 
 ## Sources
 - [AN 11.2 (Access to Insight)](https://www.accesstoinsight.org/tipitaka/an/an11/an11.002.than.html)

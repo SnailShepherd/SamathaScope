@@ -21,15 +21,15 @@ import kotlin.math.sqrt
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
 
+  private val ctx = app.applicationContext
+  private val plotSettingsStore = createPlotSettingsStore(ctx)
+
   private val _ui = MutableStateFlow(
     UiState(
-      plotSettings = createPlotSettingsStore(app.applicationContext).load()
+      plotSettings = plotSettingsStore.load(),
     )
   )
   val ui: StateFlow<UiState> = _ui
-
-  private val ctx = app.applicationContext
-  private val plotSettingsStore = createPlotSettingsStore(ctx)
 
   private val btAdapter: BluetoothAdapter? by lazy {
     val mgr = ctx.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
@@ -42,38 +42,48 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   private val eegProcessor = EegProcessor(sampleRateHz = rawSampleRateHz)
   private val calibration = CalibrationManager(calibrationSeconds = 60)
   private val scorer = ScoreModel()
-  private val metricHistory = MetricHistory(maxSeconds = 600, pointsPerSecond = 4)
-  private val smoothingWindowPoints = 16
-  private val samathaSmoother = RollingAverage(smoothingWindowPoints)
-  private val relaxedAlertnessSmoother = RollingAverage(smoothingWindowPoints)
-  private val artefactSmoother = RollingAverage(smoothingWindowPoints)
+  private val metricHistory = MetricHistory(maxSeconds = 600, pointsPerSecond = 1)
 
-  private var statsSumSamatha = 0f
+  private val contaminatedProbabilitySmoother = ExponentialSmoother(alpha = 0.3f)
+  private val drowsyProbabilitySmoother = ExponentialSmoother(alpha = 0.3f)
+  private val settledProbabilitySmoother = ExponentialSmoother(alpha = 0.3f)
+  private val effortfulFocusProbabilitySmoother = ExponentialSmoother(alpha = 0.3f)
+  private val mindWanderingProbabilitySmoother = ExponentialSmoother(alpha = 0.3f)
+  private val uncertainProbabilitySmoother = ExponentialSmoother(alpha = 0.3f)
+  private val alertnessSmoother = ExponentialSmoother(alpha = 0.3f)
+  private val controlSmoother = ExponentialSmoother(alpha = 0.3f)
+  private val settlednessSmoother = ExponentialSmoother(alpha = 0.3f)
+  private val artefactSmoother = ExponentialSmoother(alpha = 0.3f)
+  private val qualityConfidenceSmoother = ExponentialSmoother(alpha = 0.3f)
+  private val meditationProxySmoother = ExponentialSmoother(alpha = 0.3f)
+  private val stateHoldSmoother = StateHoldSmoother()
+
+  private var statsSumMeditationProxy = 0f
   private var statsCount = 0
-  private var timeSamathaOver80Ms = 0L
+  private var timeMeditationProxyOver80Ms = 0L
   private var lastFeatureTsMs = 0L
 
   private var sessionStartMs: Long = 0L
   private var pausedAtMs: Long = 0L
   private var pausedAccumMs: Long = 0L
-
   private var sessionJob: Job? = null
 
   private var audio: NoiseAudioEngine? = null
   private var recorder: SessionRecorder? = null
 
-  private var lastSampleAtMs: Long = 0
-  private var rawCountThisSecond: Int = 0
-  private var lastRateTickMs: Long = 0
-  private var rawPreviewDecim: Int = 0
+  private var lastSampleAtMs: Long = 0L
+  private var rawCountThisSecond = 0
+  private var lastRateTickMs: Long = 0L
+  private var rawPreviewDecim = 0
 
-  private var lastGameUpdateMs: Long = 0L
-  private var lastAdaptiveCalibrationUpdateMs: Long = 0L
+  private var lastGameUpdateMs = 0L
+  private var lastAdaptiveCalibrationUpdateMs = 0L
   private var calibrationRawCount = 0
   private var calibrationRawMean = 0.0
   private var calibrationRawM2 = 0.0
 
   init {
+    eegProcessor.setNotchEnabled(_ui.value.notch50Enabled)
     if (Build.VERSION.SDK_INT < 31) {
       _ui.update { it.copy(btPermissionGranted = true) }
       refreshBondedDevices()
@@ -146,20 +156,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     if (!_ui.value.connected) return
 
     eegProcessor.reset()
+    eegProcessor.setNotchEnabled(_ui.value.notch50Enabled)
     calibration.reset()
     scorer.reset()
     metricHistory.reset()
     resetRawCalibrationStats()
+    resetSmoothers()
 
-    statsSumSamatha = 0f
+    statsSumMeditationProxy = 0f
     statsCount = 0
-    timeSamathaOver80Ms = 0L
+    timeMeditationProxyOver80Ms = 0L
     lastFeatureTsMs = 0L
     lastGameUpdateMs = 0L
     lastAdaptiveCalibrationUpdateMs = 0L
-    samathaSmoother.reset()
-    relaxedAlertnessSmoother.reset()
-    artefactSmoother.reset()
 
     sessionStartMs = System.currentTimeMillis()
     pausedAtMs = 0L
@@ -171,7 +180,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         type = PlotType.RAW,
         newSettings = _ui.value.plotSettings.getValue(PlotType.RAW).copy(yMin = yMin, yMax = yMax, isUserLocked = false),
         persist = true,
-        refresh = false
+        refresh = false,
       )
     }
 
@@ -195,9 +204,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         calibrating = true,
         calibrationRemainingSec = calibration.calibrationSeconds,
         sessionElapsedSec = 0,
+        meditationProxy = 0f,
+        settledness = 0f,
+        control = 0f,
+        alertness = 0f,
+        drowsyScore = 0f,
+        artefactScore = 0f,
+        qualityConfidence = 0f,
+        effortfulFocusScore = 0f,
+        mindWanderingScore = 0f,
+        displayedStateLabel = StateLabel.UNCERTAIN,
+        avgMeditationProxy = 0f,
+        timeMeditationProxyOver80Seconds = 0,
         audioRunning = true,
         audioMuted = true,
         plotHistory = emptyList(),
+        gameState = it.gameState.copy(altitude = 0.5f, velocity = 0f),
+        gameHudState = it.gameHudState.copy(metricValuePercent = 0, artefactPercent = 0, stateLabel = StateLabel.UNCERTAIN),
       )
     }
 
@@ -208,14 +231,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       while (_ui.value.sessionRunning) {
         val now = System.currentTimeMillis()
         val rem = calibration.remainingSeconds()
-
         val elapsedMs = now - sessionStartMs - pausedAccumMs - if (_ui.value.sessionPaused) (now - pausedAtMs) else 0L
         val elapsedSec = (elapsedMs / 1000L).toInt().coerceAtLeast(0)
 
         _ui.update {
           it.copy(
             calibrationRemainingSec = rem,
-            sessionElapsedSec = elapsedSec
+            sessionElapsedSec = elapsedSec,
           )
         }
 
@@ -268,7 +290,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       audio?.setMuted(true)
       _ui.update { it.copy(sessionPaused = true, audioMuted = true) }
     } else {
-      pausedAccumMs += (now - pausedAtMs).coerceAtLeast(0)
+      pausedAccumMs += (now - pausedAtMs).coerceAtLeast(0L)
       pausedAtMs = 0L
       val shouldUnmute = !_ui.value.calibrating
       audio?.setMuted(!shouldUnmute)
@@ -277,8 +299,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   }
 
   fun setInvertReward(value: Boolean) = _ui.update { it.copy(invertReward = value) }
-
-  fun setArtefactsReduceScore(value: Boolean) = _ui.update { it.copy(artefactsReduceScore = value) }
 
   fun setCrackleEnabled(value: Boolean) = _ui.update { it.copy(crackleEnabled = value) }
 
@@ -292,13 +312,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   fun setRecordingEnabled(value: Boolean) = _ui.update { it.copy(recordingEnabled = value) }
 
+  fun setNotch50Enabled(value: Boolean) {
+    eegProcessor.setNotchEnabled(value)
+    _ui.update { it.copy(notch50Enabled = value) }
+  }
+
   fun setFeedbackMetric(value: PlotType) {
-    if (value == PlotType.RAW) return
+    if (!rewardSelectableMetrics().contains(value)) return
     _ui.update { it.copy(feedbackMetric = value) }
   }
 
   fun setGameMetric(value: PlotType) {
-    if (value == PlotType.RAW) return
+    if (!rewardSelectableMetrics().contains(value)) return
     _ui.update { state ->
       state.copy(
         gameState = state.gameState.copy(metric = value)
@@ -398,14 +423,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   private fun handleRawSample(raw: Int) {
     val now = System.currentTimeMillis()
-
-    val prev = lastSampleAtMs
     lastSampleAtMs = now
 
     if (lastRateTickMs == 0L) lastRateTickMs = now
     rawCountThisSecond++
-    if (now - lastRateTickMs >= 1000) {
-      val samplesPerSecond = rawCountThisSecond * 1000f / max(1L, (now - lastRateTickMs)).toFloat()
+    if (now - lastRateTickMs >= 1000L) {
+      val samplesPerSecond = rawCountThisSecond * 1000f / max(1L, now - lastRateTickMs).toFloat()
       rawCountThisSecond = 0
       lastRateTickMs = now
       _ui.update { it.copy(samplesPerSecond = samplesPerSecond) }
@@ -423,110 +446,107 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     if (features == null) return
+    if (!_ui.value.sessionRunning || _ui.value.sessionPaused) return
 
     val poorSignal = _ui.value.poorSignal
-    val stallMs = if (prev == 0L) 0L else (now - prev).coerceAtLeast(0)
-    val artefacts = scorer.artefacts(poorSignal = poorSignal, features = features, stallMs = stallMs)
-
+    val output = scorer.classify(poorSignal = poorSignal, features = features)
     val runningActive = _ui.value.sessionRunning && !_ui.value.sessionPaused
 
     if (_ui.value.sessionRunning && _ui.value.calibrating) {
-      calibration.addSample(rai = features.rai, artefactA = artefacts.totalA)
+      calibration.addSample(features = features, quality = output.quality)
     } else if (runningActive && !_ui.value.calibrating) {
-      calibration.addAdaptiveSample(
-        rai = features.rai,
-        artefactA = artefacts.totalA,
-        poorSignal = poorSignal,
-      )
+      calibration.addAdaptiveSample(features = features, quality = output.quality)
       maybeUpdateAdaptiveCalibration(now)
     }
 
-    val samathaScoreInstant = scorer.scoreS(
-      rai = features.rai,
-      artefactA = artefacts.totalA,
-      artefactsReduceScore = _ui.value.artefactsReduceScore
+    val smoothedProbabilities = StateProbabilities(
+      contaminated = contaminatedProbabilitySmoother.add(output.probabilities.contaminated),
+      drowsy = drowsyProbabilitySmoother.add(output.probabilities.drowsy),
+      settled = settledProbabilitySmoother.add(output.probabilities.settled),
+      effortfulFocus = effortfulFocusProbabilitySmoother.add(output.probabilities.effortfulFocus),
+      mindWandering = mindWanderingProbabilitySmoother.add(output.probabilities.mindWandering),
+      uncertain = uncertainProbabilitySmoother.add(output.probabilities.uncertain),
     )
-    val relaxedAlertnessInstant = scorer.normaliseRai(features.rai)
-    val artefactInstant = artefacts.totalA
-
-    val samathaScoreSmoothed = samathaSmoother.add(samathaScoreInstant)
-    val relaxedAlertnessSmoothed = relaxedAlertnessSmoother.add(relaxedAlertnessInstant)
-    val artefactSmoothed = artefactSmoother.add(artefactInstant)
+    val smoothedAlertness = alertnessSmoother.add(output.alertness)
+    val smoothedControl = controlSmoother.add(output.control)
+    val smoothedSettledness = settlednessSmoother.add(output.settledness)
+    val smoothedArtefact = artefactSmoother.add(output.quality.artefactScore)
+    val smoothedQualityConfidence = qualityConfidenceSmoother.add(output.qualityConfidence)
+    val smoothedMeditationProxy = meditationProxySmoother.add(output.meditationProxy)
+    val displayedState = stateHoldSmoother.update(
+      candidate = output.rawStateLabel,
+      confidence = smoothedProbabilities.valueFor(output.rawStateLabel),
+    )
 
     if (runningActive) {
-      statsSumSamatha += samathaScoreInstant
+      statsSumMeditationProxy += smoothedMeditationProxy
       statsCount++
-
       if (lastFeatureTsMs != 0L) {
-        val dt = (now - lastFeatureTsMs).coerceAtLeast(0)
-        if (samathaScoreInstant >= 0.80f) timeSamathaOver80Ms += dt
+        val dt = (now - lastFeatureTsMs).coerceAtLeast(0L)
+        if (smoothedMeditationProxy >= 0.80f) {
+          timeMeditationProxyOver80Ms += dt
+        }
       }
       lastFeatureTsMs = now
     }
 
     metricHistory.add(
-      samathaScore = samathaScoreSmoothed,
-      artefactScore = artefactSmoothed,
-      relaxedAlertnessIndex = relaxedAlertnessSmoothed,
-      meditationValue = _ui.value.meditation,
-      attentionValue = _ui.value.attention
+      mapOf(
+        PlotType.MEDITATION_PROXY to smoothedMeditationProxy,
+        PlotType.SETTLEDNESS to smoothedSettledness,
+        PlotType.CONTROL to smoothedControl,
+        PlotType.ALERTNESS to smoothedAlertness,
+        PlotType.DROWSY_SCORE to smoothedProbabilities.drowsy,
+        PlotType.ARTEFACT_SCORE to smoothedArtefact,
+        PlotType.QUALITY_CONFIDENCE to smoothedQualityConfidence,
+        PlotType.EFFORTFUL_FOCUS_SCORE to smoothedProbabilities.effortfulFocus,
+        PlotType.MIND_WANDERING_SCORE to smoothedProbabilities.mindWandering,
+        PlotType.ESENSE_MEDITATION to _ui.value.meditation.toFloat(),
+        PlotType.ESENSE_ATTENTION to _ui.value.attention.toFloat(),
+      )
     )
 
-    val feedback = metricValueForType(
+    val feedback = rewardValueForType(
       type = _ui.value.feedbackMetric,
-      samathaScore = samathaScoreSmoothed,
-      artefactScore = artefactSmoothed,
-      relaxedAlertnessIndex = relaxedAlertnessSmoothed,
-      meditation = _ui.value.meditation,
-      attention = _ui.value.attention,
+      meditationProxy = smoothedMeditationProxy,
+      settledness = smoothedSettledness,
+      control = smoothedControl,
+      alertness = smoothedAlertness,
+      qualityConfidence = smoothedQualityConfidence,
+      effortfulFocus = smoothedProbabilities.effortfulFocus,
     )
 
     val shouldAudioRun = _ui.value.sessionRunning && !_ui.value.sessionPaused && !_ui.value.calibrating
     if (shouldAudioRun) {
       audio?.update(
-        scoreS = feedback,
-        artefactA = artefactSmoothed,
+        feedbackValue = feedback,
+        artefactA = smoothedArtefact,
         invertReward = _ui.value.invertReward,
         gamma = _ui.value.gamma,
         gMinDb = _ui.value.gMinDb,
         gMaxDb = _ui.value.gMaxDb,
         crackleEnabled = _ui.value.crackleEnabled,
-        crackleIntensity = _ui.value.crackleIntensity
+        crackleIntensity = _ui.value.crackleIntensity,
       )
       audio?.setMuted(false)
     } else {
       audio?.setMuted(true)
     }
 
-    recorder?.appendFeatures(
-      timestampMs = now,
-      rai = features.rai,
-      scoreS = samathaScoreInstant,
-      scoreA = artefactInstant,
-      poorSignal = poorSignal,
-      aContact = artefacts.contact,
-      aLine = artefacts.line,
-      aEmg = artefacts.emg,
-      aBlink = artefacts.blink,
-      aStall = artefacts.stall,
-    )
-
-    val avgSamatha = if (statsCount == 0) 0f else (statsSumSamatha / statsCount.toFloat())
-    val over80Seconds = (timeSamathaOver80Ms / 1000L).toInt()
-
-    val gameMetricValue = metricValueForType(
+    val gameMetricValue = rewardValueForType(
       type = _ui.value.gameState.metric,
-      samathaScore = samathaScoreSmoothed,
-      artefactScore = artefactSmoothed,
-      relaxedAlertnessIndex = relaxedAlertnessSmoothed,
-      meditation = _ui.value.meditation,
-      attention = _ui.value.attention,
+      meditationProxy = smoothedMeditationProxy,
+      settledness = smoothedSettledness,
+      control = smoothedControl,
+      alertness = smoothedAlertness,
+      qualityConfidence = smoothedQualityConfidence,
+      effortfulFocus = smoothedProbabilities.effortfulFocus,
     )
 
-    val dtSeconds = if (lastGameUpdateMs == 0L) {
+    val elapsedForGame = if (lastGameUpdateMs == 0L) {
       0.25f
     } else {
-      ((now - lastGameUpdateMs).toFloat() / 1000f).coerceIn(0.016f, 0.25f)
+      ((now - lastGameUpdateMs).toFloat() / 1000f).coerceIn(0.05f, 1.0f)
     }
     lastGameUpdateMs = now
 
@@ -536,39 +556,71 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         velocity = _ui.value.gameState.velocity,
       ),
       target = GamePhysics.metricToTargetHeight(gameMetricValue),
-      dtSeconds = dtSeconds,
+      dtSeconds = elapsedForGame,
     )
+
+    recorder?.appendFeatures(
+      RecordedFeatureRow(
+        timestampMs = now,
+        poorSignal = poorSignal,
+        notch50Enabled = _ui.value.notch50Enabled,
+        features = features,
+        zScores = output.zScores,
+        quality = output.quality,
+        rawProbabilities = output.probabilities,
+        smoothedProbabilities = smoothedProbabilities,
+        rawStateLabel = output.rawStateLabel,
+        displayedStateLabel = displayedState,
+        alertness = smoothedAlertness,
+        control = smoothedControl,
+        settledness = smoothedSettledness,
+        meditationProxy = smoothedMeditationProxy,
+        feedbackMetric = _ui.value.feedbackMetric,
+        feedbackValue = feedback,
+        gameMetric = _ui.value.gameState.metric,
+        gameValue = gameMetricValue,
+      )
+    )
+
+    val avgMeditationProxy = if (statsCount == 0) 0f else statsSumMeditationProxy / statsCount.toFloat()
+    val over80Seconds = (timeMeditationProxyOver80Ms / 1000L).toInt()
 
     _ui.update {
       it.copy(
-        relaxedAlertnessIndex = relaxedAlertnessInstant,
-        samathaScore = samathaScoreInstant,
-        artefactScore = artefactInstant,
-        avgSamathaScore = avgSamatha,
-        timeSamathaOver80Seconds = over80Seconds,
-
-        artefactContact = artefacts.contact,
-        artefactLine = artefacts.line,
-        artefactEmg = artefacts.emg,
-        artefactBlink = artefacts.blink,
-        artefactStall = artefacts.stall,
-        streamStallMs = artefacts.stallMs,
-
+        meditationProxy = smoothedMeditationProxy,
+        settledness = smoothedSettledness,
+        control = smoothedControl,
+        alertness = smoothedAlertness,
+        drowsyScore = smoothedProbabilities.drowsy,
+        artefactScore = smoothedArtefact,
+        qualityConfidence = smoothedQualityConfidence,
+        effortfulFocusScore = smoothedProbabilities.effortfulFocus,
+        mindWanderingScore = smoothedProbabilities.mindWandering,
+        displayedStateLabel = displayedState,
+        avgMeditationProxy = avgMeditationProxy,
+        timeMeditationProxyOver80Seconds = over80Seconds,
+        artefactContact = output.quality.contact,
+        artefactLine = output.quality.lineNoise,
+        artefactEmg = output.quality.emg,
+        artefactBlink = output.quality.blink,
+        artefactClip = output.quality.clip,
+        artefactStall = output.quality.stall,
+        streamStallMs = features.maxGapMs,
         audioRunning = audio != null,
         audioMuted = !shouldAudioRun,
         audioBaseDb = audio?.debugBaseDb ?: it.audioBaseDb,
-
         gameState = it.gameState.copy(
           altitude = nextLevitation.altitude,
           velocity = nextLevitation.velocity,
         ),
         gameHudState = it.gameHudState.copy(
           metricValuePercent = (gameMetricValue * 100f).toInt().coerceIn(0, 100),
-          artefactPercent = (artefactSmoothed * 100f).toInt().coerceIn(0, 100),
+          artefactPercent = (smoothedArtefact * 100f).toInt().coerceIn(0, 100),
           poorSignal = poorSignal,
           elapsedSeconds = it.sessionElapsedSec,
           batteryPercent = it.batteryPercent,
-        )
+          stateLabel = displayedState,
+        ),
       )
     }
 
@@ -581,22 +633,35 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     lastAdaptiveCalibrationUpdateMs = now
   }
 
-  private fun metricValueForType(
+  private fun rewardValueForType(
     type: PlotType,
-    samathaScore: Float,
-    artefactScore: Float,
-    relaxedAlertnessIndex: Float,
-    meditation: Int,
-    attention: Int,
+    meditationProxy: Float,
+    settledness: Float,
+    control: Float,
+    alertness: Float,
+    qualityConfidence: Float,
+    effortfulFocus: Float,
   ): Float {
     return when (type) {
-      PlotType.SAMATHA_SCORE -> samathaScore
-      PlotType.ARTEFACT_SCORE -> (1f - artefactScore).coerceIn(0f, 1f)
-      PlotType.RELAXED_ALERTNESS_INDEX -> relaxedAlertnessIndex.coerceIn(0f, 1f)
-      PlotType.ESENSE_MEDITATION -> (meditation / 100f).coerceIn(0f, 1f)
-      PlotType.ESENSE_ATTENTION -> (attention / 100f).coerceIn(0f, 1f)
-      PlotType.RAW -> samathaScore
+      PlotType.MEDITATION_PROXY -> meditationProxy
+      PlotType.SETTLEDNESS -> (settledness * alertness * qualityConfidence).coerceIn(0f, 1f)
+      PlotType.CONTROL -> (control * alertness * qualityConfidence).coerceIn(0f, 1f)
+      PlotType.ALERTNESS -> (alertness * qualityConfidence).coerceIn(0f, 1f)
+      PlotType.QUALITY_CONFIDENCE -> (qualityConfidence * alertness).coerceIn(0f, 1f)
+      PlotType.EFFORTFUL_FOCUS_SCORE -> (effortfulFocus * alertness * qualityConfidence).coerceIn(0f, 1f)
+      else -> 0f
     }
+  }
+
+  private fun rewardSelectableMetrics(): Set<PlotType> {
+    return setOf(
+      PlotType.MEDITATION_PROXY,
+      PlotType.SETTLEDNESS,
+      PlotType.CONTROL,
+      PlotType.ALERTNESS,
+      PlotType.QUALITY_CONFIDENCE,
+      PlotType.EFFORTFUL_FOCUS_SCORE,
+    )
   }
 
   private fun updatePlotSettings(
@@ -641,13 +706,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   private fun convertSeriesForDisplay(type: PlotType, values: List<Float>): List<Float> {
     return when (type) {
-      PlotType.SAMATHA_SCORE,
-      PlotType.ARTEFACT_SCORE,
-      PlotType.RELAXED_ALERTNESS_INDEX -> values.map { (it * 100f).coerceIn(0f, 100f) }
       PlotType.ESENSE_MEDITATION,
       PlotType.ESENSE_ATTENTION -> values.map { it.coerceIn(0f, 100f) }
       PlotType.RAW -> values
+      else -> values.map { (it * 100f).coerceIn(0f, 100f) }
     }
+  }
+
+  private fun resetSmoothers() {
+    contaminatedProbabilitySmoother.reset()
+    drowsyProbabilitySmoother.reset()
+    settledProbabilitySmoother.reset()
+    effortfulFocusProbabilitySmoother.reset()
+    mindWanderingProbabilitySmoother.reset()
+    uncertainProbabilitySmoother.reset()
+    alertnessSmoother.reset()
+    controlSmoother.reset()
+    settlednessSmoother.reset()
+    artefactSmoother.reset()
+    qualityConfidenceSmoother.reset()
+    meditationProxySmoother.reset()
+    stateHoldSmoother.reset()
   }
 
   private fun resetRawCalibrationStats() {

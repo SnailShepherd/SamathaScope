@@ -6,29 +6,20 @@ import org.junit.Test
 class RollingAverageTest {
 
   @Test
-  fun add_usesMovingWindowOfFixedCapacity() {
-    val avg = RollingAverage(capacity = 16)
+  fun exponentialSmoother_usesPreviousValue() {
+    val smoother = ExponentialSmoother(alpha = 0.3f)
 
-    var last = 0f
-    for (v in 1..20) {
-      last = avg.add(v.toFloat())
-    }
-
-    // Average of [5..20] = 12.5
-    assertThat(last).isWithin(1e-6f).of(12.5f)
-    assertThat(avg.size()).isEqualTo(16)
+    assertThat(smoother.add(1f)).isEqualTo(1f)
+    assertThat(smoother.add(0f)).isWithin(1e-6f).of(0.7f)
   }
 
   @Test
-  fun reset_clearsState() {
-    val avg = RollingAverage(capacity = 4)
-    avg.add(1f)
-    avg.add(3f)
+  fun stateHold_requiresRepeatedWinsUnlessConfidenceIsHigh() {
+    val hold = StateHoldSmoother(requiredWins = 3, immediateThreshold = 0.70f)
 
-    avg.reset()
-
-    assertThat(avg.size()).isEqualTo(0)
-    assertThat(avg.average()).isEqualTo(0f)
+    assertThat(hold.update(StateLabel.SETTLED, 0.60f)).isEqualTo(StateLabel.UNCERTAIN)
+    assertThat(hold.update(StateLabel.SETTLED, 0.60f)).isEqualTo(StateLabel.UNCERTAIN)
+    assertThat(hold.update(StateLabel.SETTLED, 0.60f)).isEqualTo(StateLabel.SETTLED)
+    assertThat(hold.update(StateLabel.DROWSY, 0.80f)).isEqualTo(StateLabel.DROWSY)
   }
 }
-

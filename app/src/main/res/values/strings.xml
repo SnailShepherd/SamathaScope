@@ -1,6 +1,6 @@
 <resources>
   <string name="app_name">SamathaScope</string>
-  <string name="app_title">SamathaScope v0.3</string>
+  <string name="app_title">SamathaScope v0.4</string>
   <string name="settings">Settings</string>
 
   <string name="tab_dashboard">Dashboard</string>
@@ -28,11 +28,11 @@
   <string name="resume_session">Resume session</string>
   <string name="stop_session">Stop session</string>
   <string name="calibrating_countdown">Calibrating: %1$ds</string>
-  <string name="calibration_hint">Sit still and relax your face while calibration completes.</string>
-  <string name="session_stats">Session: %1$ds   Avg Samatha: %2$d%%   Samatha >= 80%%: %3$ds</string>
+  <string name="calibration_hint">Sit still, stay awake, and relax your face while calibration completes.</string>
   <string name="session_elapsed_label">Session elapsed</string>
-  <string name="session_avg_samatha_label">Average Samatha</string>
-  <string name="session_over_80_label">Samatha >= 80%%</string>
+  <string name="session_state_label">Displayed state</string>
+  <string name="session_avg_proxy_label">Average Meditation Proxy</string>
+  <string name="session_over_80_label">Meditation Proxy >= 80%%</string>
   <string name="idle_status">Idle</string>
 
   <string name="section_raw_eeg">Raw EEG</string>
@@ -41,19 +41,25 @@
   <string name="live_range_label">Window: %1$ds   Y range: %2$d to %3$d</string>
 
   <string name="section_diagnostics">Diagnostics</string>
+  <string name="state_label">State</string>
+  <string name="metric_settledness">Settledness</string>
+  <string name="metric_control">Control</string>
+  <string name="metric_alertness">Alertness</string>
+  <string name="metric_drowsy_score">Drowsy score</string>
+  <string name="metric_quality_confidence">Quality confidence</string>
   <string name="diagnostic_contact">Contact quality</string>
   <string name="diagnostic_line">Line noise (50Hz, diagnostics only)</string>
   <string name="diagnostic_emg">EMG proxy</string>
   <string name="diagnostic_blink">Blinks and transients</string>
+  <string name="diagnostic_clip">Clipping</string>
   <string name="diagnostic_stall">Packet stalls</string>
-  <string name="diagnostic_total">Total artefact score (excludes 50Hz line noise)</string>
+  <string name="diagnostic_total">Total artefact score</string>
   <string name="esense_line">eSense Attention: %1$d   eSense Meditation: %2$d</string>
 
   <string name="section_feedback_source">Feedback source</string>
   <string name="invert_reward">Invert reward (louder means better)</string>
-  <string name="artefacts_reduce_score">Artefacts reduce Samatha Score</string>
   <string name="crackle_overlay">Crackle overlay (independent)</string>
-  <string name="crackle_helper">Adds short crackling bursts from artefact score so movement/contact noise is audible separately from base feedback.</string>
+  <string name="crackle_helper">Adds short crackling bursts from artefact score so contamination is audible separately from the base reward.</string>
   <string name="gamma_value">Sensitivity (gamma): %1$.2f</string>
   <string name="gamma_helper">Gamma controls response curve sensitivity: higher gamma is gentler near good states and more pronounced near poor states.</string>
   <string name="base_noise_range">Base noise range (dB): min %1$d  max %2$d</string>
@@ -69,9 +75,15 @@
 
   <string name="section_live_plot">Live plot</string>
   <string name="plot_raw">Raw EEG</string>
-  <string name="plot_samatha_score">Samatha Score</string>
+  <string name="plot_meditation_proxy">Meditation Proxy</string>
+  <string name="plot_settledness">Settledness</string>
+  <string name="plot_control">Control</string>
+  <string name="plot_alertness">Alertness</string>
+  <string name="plot_drowsy_score">Drowsy Score</string>
   <string name="plot_artefact_score">Artefact Score</string>
-  <string name="plot_relaxed_alertness">Relaxed Alertness Index</string>
+  <string name="plot_quality_confidence">Quality Confidence</string>
+  <string name="plot_effortful_focus">Effortful Focus</string>
+  <string name="plot_mind_wandering">Mind Wandering</string>
   <string name="plot_esense_meditation">eSense Meditation</string>
   <string name="plot_esense_attention">eSense Attention</string>
 
@@ -87,27 +99,37 @@
   <string name="game_scene_title">Levitation scene</string>
   <string name="game_hud_metric">Metric value</string>
   <string name="game_hud_artefact">Artefact score</string>
+  <string name="game_hud_state">State</string>
   <string name="game_hud_signal">Signal quality</string>
   <string name="game_hud_elapsed">Elapsed time</string>
   <string name="game_hud_battery">Battery</string>
 
   <string name="record_local">Record raw data and feature values locally</string>
   <string name="saved_under">Saved under: %1$s</string>
+  <string name="notch_50_enabled">Enable optional 50 Hz notch</string>
+  <string name="notch_50_helper">Use only if mains contamination is still obvious. The main classifier already limits most analysis to 1-35 Hz.</string>
   <string name="close">Close</string>
 
-  <string name="learn_samatha_title">Samatha in Theravada context</string>
-  <string name="learn_samatha_body">In Theravada practice, samatha refers to calm collectedness developed through steady attention and reduced agitation. It supports stability and clarity but is not identical to full liberating insight on its own.</string>
-  <string name="learn_score_title">Samatha Score in this app</string>
-  <string name="learn_score_body">Samatha Score is a training proxy. It combines normalized Relaxed Alertness Index with an optional artefact penalty for movement, contact instability, EMG proxy, blink/transient activity, and stalls.</string>
-  <string name="learn_metric_difference_title">Samatha Score vs Relaxed Alertness Index</string>
-  <string name="learn_metric_difference_body">Relaxed Alertness Index is the normalized EEG index (alpha versus high-frequency activity). Samatha Score starts from that index and then optionally applies artefact penalty. If artefact penalty is off, the two are effectively the same signal.</string>
+  <string name="learn_samatha_title">Samatha and relaxed alertness</string>
+  <string name="learn_samatha_body">Samatha in practice points toward calm collectedness. This app tries to reward relaxed alertness rather than quiet drowsiness, so the feedback signal fades down when the frontal pattern looks sleepy or contaminated.</string>
+  <string name="learn_score_title">Frontal-state feedback proxy</string>
+  <string name="learn_score_body">The live reward is a personalised frontal-state classifier built from 8-second raw EEG windows. It combines settledness, alertness, and signal quality instead of relying on a single alpha-heavy score.</string>
+  <string name="learn_metric_difference_title">Settled is not drowsy</string>
+  <string name="learn_metric_difference_body">Drowsiness is estimated first so the app does not confuse sleepy theta-heavy slowing with useful meditation feedback. A settled state here means relaxed and awake, not merely low-energy.</string>
   <string name="learn_caveat_title">Interpretation limits</string>
-  <string name="learn_caveat_body">This score is not a direct measure of meditative attainment. It is a practical biofeedback estimate based on one dry frontal electrode and should be interpreted as a session aid, not as doctrinal validation.</string>
+  <string name="learn_caveat_body">This is a non-medical training aid built around one dry frontal electrode at FP1 with an ear reference. It cannot infer whole-brain state, connectivity, source localisation, or meditative attainment.</string>
   <string name="learn_wellbeing_title">Wellbeing note</string>
-  <string name="learn_wellbeing_body">SamathaScope is a non-medical training tool. If you feel discomfort, fatigue, or stress during sessions, pause and recover before continuing.</string>
+  <string name="learn_wellbeing_body">If you feel discomfort, fatigue, or stress during sessions, pause and recover before continuing. Quietness alone is not the goal; stable, alert practice is.</string>
   <string name="learn_sources_title">Sources</string>
   <string name="learn_sources_intro">The app includes short offline summaries and optional links for deeper reading.</string>
   <string name="learn_source_1">AN 11.2 (canonical reference)</string>
   <string name="learn_source_2">AN 4.41 (canonical reference)</string>
   <string name="learn_source_3">With Each and Every Breath (modern practical guide)</string>
+
+  <string name="state_signal_contaminated">Signal contaminated</string>
+  <string name="state_drowsy">Drowsy</string>
+  <string name="state_settled">Settled</string>
+  <string name="state_effortful_focus">Effortful focus</string>
+  <string name="state_mind_wandering">Mind wandering</string>
+  <string name="state_uncertain">Uncertain</string>
 </resources>

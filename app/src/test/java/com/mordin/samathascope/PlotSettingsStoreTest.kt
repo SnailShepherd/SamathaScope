@@ -1,4 +1,4 @@
-﻿package com.mordin.samathascope
+package com.mordin.samathascope
 
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
@@ -25,7 +25,7 @@ class PlotSettingsStoreTest {
 
     val loaded = store.load()
 
-    assertThat(loaded.getValue(PlotType.SAMATHA_SCORE).windowSeconds).isEqualTo(300)
+    assertThat(loaded.getValue(PlotType.MEDITATION_PROXY).windowSeconds).isEqualTo(300)
     assertThat(loaded.getValue(PlotType.RAW).windowSeconds).isEqualTo(5)
   }
 

@@ -6,27 +6,116 @@ import org.junit.Test
 class ScoreModelTest {
 
   @Test
-  fun totalArtefact_excludesLineNoiseContribution() {
+  fun quality_ignoresLineNoiseInTotalArtefact() {
     val scorer = ScoreModel()
+    val baseFeatures = feature(lineNoiseRatio = 0.02f)
+    val highLineFeatures = feature(lineNoiseRatio = 0.40f)
 
-    val baseFeatures = EegFeatures(
-      rai = 0f,
-      alphaPower = 1f,
-      hiPower = 1f,
-      total145 = 100f,
-      line50 = 1f,
-      emgFrac = 0.20f,
-      blinkScore = 0.10f,
-      clipFrac = 0f,
+    val base = scorer.quality(poorSignal = 10, features = baseFeatures)
+    val highLine = scorer.quality(poorSignal = 10, features = highLineFeatures)
+
+    assertThat(highLine.lineNoise).isGreaterThan(base.lineNoise)
+    assertThat(highLine.artefactScore).isWithin(1e-6f).of(base.artefactScore)
+  }
+
+  @Test
+  fun classify_marksContaminatedWindowsAndSuppressesProxy() {
+    val scorer = ScoreModel()
+    scorer.setCalibration(calibration())
+
+    val output = scorer.classify(
+      poorSignal = 40,
+      features = feature(hfRatio = 0.50f, blinkRateHz = 0.9f, clipFraction = 0.02f),
     )
 
-    val highLineFeatures = baseFeatures.copy(line50 = 60f)
+    assertThat(output.rawStateLabel).isEqualTo(StateLabel.SIGNAL_CONTAMINATED)
+    assertThat(output.quality.isContaminated).isTrue()
+    assertThat(output.meditationProxy).isLessThan(0.2f)
+  }
 
-    val base = scorer.artefacts(poorSignal = 40, features = baseFeatures, stallMs = 100)
-    val highLine = scorer.artefacts(poorSignal = 40, features = highLineFeatures, stallMs = 100)
+  @Test
+  fun classify_separatesDrowsyFromSettled() {
+    val scorer = ScoreModel()
+    scorer.setCalibration(calibration())
 
-    assertThat(highLine.line).isGreaterThan(base.line)
-    assertThat(highLine.totalA).isWithin(1e-6f).of(base.totalA)
+    val drowsy = scorer.classify(
+      poorSignal = 10,
+      features = feature(
+        tbr = 0.8f,
+        tar = 0.9f,
+        abr = -0.6f,
+        spectralEntropy = 0.1f,
+        emg = -1.2f,
+      ),
+    )
+    val settled = scorer.classify(
+      poorSignal = 10,
+      features = feature(
+        tbr = -0.5f,
+        tar = -0.4f,
+        abr = 0.7f,
+        spectralEntropy = 0.8f,
+        emg = -1.4f,
+      ),
+    )
+
+    assertThat(drowsy.rawStateLabel).isEqualTo(StateLabel.DROWSY)
+    assertThat(drowsy.drowsyScore).isGreaterThan(0.65f)
+    assertThat(settled.rawStateLabel).isEqualTo(StateLabel.SETTLED)
+    assertThat(settled.meditationProxy).isGreaterThan(drowsy.meditationProxy)
+  }
+
+  private fun calibration(): Calibration {
+    return Calibration(
+      logBeta = RobustBaselineStat(median = 0f, mad = 0.1f, floor = 0.1f),
+      tbr = RobustBaselineStat(median = 0f, mad = 0.1f, floor = 0.1f),
+      tar = RobustBaselineStat(median = 0f, mad = 0.1f, floor = 0.1f),
+      abr = RobustBaselineStat(median = 0f, mad = 0.1f, floor = 0.1f),
+      entropy = RobustBaselineStat(median = 0.5f, mad = 0.1f, floor = 0.1f),
+      emg = RobustBaselineStat(median = -1f, mad = 0.1f, floor = 0.1f),
+    )
+  }
+
+  private fun feature(
+    lineNoiseRatio: Float = 0.02f,
+    hfRatio: Float = 0.15f,
+    blinkRateHz: Float = 0.1f,
+    clipFraction: Float = 0f,
+    tbr: Float = 0f,
+    tar: Float = 0f,
+    abr: Float = 0.2f,
+    spectralEntropy: Float = 0.6f,
+    emg: Float = -1f,
+  ): EegFeatures {
+    return EegFeatures(
+      windowStartMs = 0L,
+      windowEndMs = 8_000L,
+      pTheta = 1.5f,
+      pAlpha = 2.0f,
+      pBeta = 1.2f,
+      pHf = 0.4f,
+      p4To13 = 2.4f,
+      p4To30 = 4.7f,
+      logTheta = 0.1f,
+      logAlpha = 0.2f,
+      logBeta = 0.1f,
+      logHf = -1.0f,
+      relativeTheta = 0.3f,
+      relativeAlpha = 0.4f,
+      relativeBeta = 0.2f,
+      relativeHf = hfRatio,
+      tbr = tbr,
+      tar = tar,
+      abr = abr,
+      thetaPeakHz = 5.5f,
+      alphaPeakHz = 10f,
+      spectralEntropy = spectralEntropy,
+      emg = emg,
+      hfRatio = hfRatio,
+      blinkRateHz = blinkRateHz,
+      clipFraction = clipFraction,
+      lineNoiseRatio = lineNoiseRatio,
+      maxGapMs = 20L,
+    )
   }
 }
-
