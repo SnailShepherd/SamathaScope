@@ -49,6 +49,7 @@ class NoiseAudioEngine(
   private var baseAmp: Float = 0f
   private var fadeIn: Float = 0f
   private var fading = false
+  private var masterAudibility: Float = 0f
 
   // Crackle envelopes per channel
   private var crackleEnvL = 0f
@@ -61,6 +62,9 @@ class NoiseAudioEngine(
   fun start() {
     if (running) return
     running = true
+    masterAudibility = 0f
+    fadeIn = 0f
+    fading = false
 
     val minBuf = AudioTrack.getMinBufferSize(
       sampleRate,
@@ -157,7 +161,11 @@ class NoiseAudioEngine(
         if (fadeIn >= 1f) { fadeIn = 1f; fading = false }
       }
 
-      val master = if (muted) 0f else (if (fading) fadeIn else 1f)
+      val masterTarget = if (muted) 0f else 1f
+      val masterTau = if (masterTarget < masterAudibility) 0.6f else 0.12f
+      val masterAlpha = 1f - exp(-dt / masterTau)
+      masterAudibility += masterAlpha * (masterTarget - masterAudibility)
+      val master = masterAudibility * (if (fading) fadeIn else 1f)
 
       val A = targetA
 

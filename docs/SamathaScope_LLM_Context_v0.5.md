@@ -8,10 +8,10 @@
 If Android Studio suggests an AGP upgrade, the project is intended to stay on AGP 8.13.x unless the whole toolchain is moved together.
 
 ---
-# SamathaScope - LLM Context Pack (v0.4)
+# SamathaScope - LLM Context Pack (v0.5)
 
 Use this file as the primary context when answering questions about the SamathaScope Android project.
-It describes the current frontal-state classifier pipeline, not the retired RAI/Samatha-score design.
+It describes the current frontal-state classifier, dashboard-first UX, and calibration flow. It does not describe the retired RAI/Samatha-score design.
 
 ---
 
@@ -28,34 +28,76 @@ Personal neurofeedback for NeuroSky MindWave Mobile 2: reward relaxed, alert fro
 - Use raw EEG as the primary source, not eSense Meditation/Attention as ground truth.
 - Work within the limits of one dry frontal electrode at FP1 with ear reference.
 - Do not claim whole-brain state, connectivity, source localisation, or meditative attainment.
-- Keep the existing session flow, tabs, recording lifecycle, and general app architecture unless a small refactor is needed.
+- Keep the Bluetooth/session/recording architecture intact unless a small refactor is needed.
+- Shared feedback source now drives both audio and game.
 
 ---
 
 ## 2) Files that matter most
 
 - `MainViewModel.kt`
-  - session lifecycle, calibration timer, smoothing, plotting history, audio/game driving
-- `ThinkGearParser.kt` + `BluetoothMindWaveClient.kt`
-  - ThinkGear packet parsing and Bluetooth SPP connection
+  - session lifecycle, calibration phases, optional artefact capture, smoothing, plotting history, shared audio/game driving
+- `App.kt`
+  - dashboard/settings/game/learn UI wiring
 - `EegProcessor.kt`
   - 8-second windowing, Welch PSD, feature extraction, raw preview
 - `CalibrationManager.kt`
-  - robust feature baselines from calibration and adaptive clean-window updates
+  - robust clean baselines plus separate artefact-capture profiling
 - `ScoreModel.kt`
   - quality gate, feature z-scores, drowsiness-first classifier, meditation proxy
+- `MetricGlossary.kt`
+  - plain-language explanations and abbreviation decoding for in-app metrics
 - `MetricHistory.kt`
-  - fixed-size 1 Hz history for metric plots
+  - fixed-size 1 Hz history for the normalized metric explorer
 - `SessionRecorder.kt`
-  - raw + features recording
+  - raw + features recording with classifier and artefact terms
 - `NoiseAudioEngine.kt`
-  - white-noise reward plus crackle overlay
-- `App.kt`
-  - current UI and settings wiring
+  - white-noise reward plus crackle overlay, fade-in/fade-out behavior
 
 ---
 
-## 3) Current signal processing pipeline (v0.4)
+## 3) Current UX model (v0.5)
+
+Tabs:
+- `Dashboard`
+- `Settings`
+- `Game`
+- `Learn`
+
+Dashboard order:
+1. headset card
+2. session card
+3. always-on raw EEG strip
+4. multi-line metric explorer
+5. diagnostics
+
+Interaction model:
+- tap a metric chip to add/remove a line
+- hold an eligible metric chip to set the shared feedback source
+- raw EEG is always visible and is not part of the metric chip selector
+
+Settings contains:
+- audio enable/disable
+- invert reward
+- crackle controls
+- gamma and base-noise range
+- metric-history window
+- recording toggle
+- optional 50 Hz notch toggle
+
+Game:
+- lantern scene
+- compact HUD
+- shared feedback-source selector synced with dashboard
+
+Learn:
+- calibration explanation
+- optional artefact-capture explanation
+- metric glossary with formulas and caveats
+
+---
+
+## 4) Signal processing pipeline
 
 Raw sample stream (512 Hz) -> ring buffer -> every 1 second:
 
@@ -90,13 +132,25 @@ Feature outputs:
 - line-noise ratio near 50 Hz
 - max packet gap / stall statistic
 
+Abbreviations:
+- `MP`: Meditation Proxy
+- `QC`: Quality Confidence
+- `TBR`: theta/beta ratio
+- `TAR`: theta/alpha ratio
+- `ABR`: alpha/beta ratio
+- `EMG`: high-frequency muscle contamination proxy
+
 ---
 
-## 4) Calibration and normalization
+## 5) Calibration and normalization
 
-Calibration stays at 60 seconds for UI simplicity, but it no longer stores percentiles of one scalar score.
+### 5.1 Clean calibration
 
-Per-user baseline stats are stored for:
+The main calibration remains 60 seconds:
+- first 30 seconds: eyes open, sit still
+- next 30 seconds: face relaxed, eyes closed
+
+It stores robust baseline stats for:
 - `logBeta`
 - `TBR`
 - `TAR`
@@ -115,22 +169,40 @@ Adaptive baselines:
 - a rolling 10-minute clean deque is maintained
 - adaptive recalibration recomputes robust stats from that deque only
 
-If fewer than 20 clean windows are available at calibration timeout, the system backfills with the least-contaminated windows so the session can still start.
+### 5.2 Optional artefact calibration
+
+After the clean baseline, the user may run a separate 25-second capture:
+- look left/right
+- look up/down
+- clench jaw
+- frown / tense forehead
+- relax to neutral
+
+This capture:
+- does **not** enter the clean classifier baseline
+- does personalize blink/transient and EMG-related normalizations
+- is stored as a separate `ArtefactCalibrationProfile`
+
+If fewer than 20 clean windows are available at baseline timeout, the system backfills with the least-contaminated windows so the session can still start.
 
 ---
 
-## 5) Two-stage state model
+## 6) Two-stage state model
 
-### 5.1 Stage 1: quality gate
+### 6.1 Stage 1: quality gate
 
 Artefact components:
 ```text
 contact = clamp01(poorSignal / 50)
-emg = clamp01((hfRatio - 0.10) / 0.25)
-blink = clamp01(blinkRateHz / 1.0)
+emg = clamp01((hfRatio - 0.10) / personalizedEmgUpper)
+blink = clamp01(blinkRateHz / personalizedBlinkUpper)
 clip = clamp01(clipFraction / 0.01)
 stall = clamp01(maxGapMs / 500)
 ```
+
+Where:
+- `personalizedBlinkUpper = max(1.0, artefactProfile.blinkNormalizationHz)`
+- `personalizedEmgUpper = max(0.35, artefactProfile.emgNormalizationHfRatio)`
 
 Combined artefact score:
 ```text
@@ -148,7 +220,7 @@ Hard contamination gate to `SIGNAL_CONTAMINATED` if any of:
 
 Line noise is retained as a diagnostic feature but excluded from the total artefact score.
 
-### 5.2 Stage 2: drowsiness-first classifier
+### 6.2 Stage 2: drowsiness-first classifier
 
 Only clean windows proceed to the classifier.
 
@@ -182,9 +254,9 @@ MeditationProxy = Settledness * Alertness * QualityConfidence
 
 ---
 
-## 6) Smoothing and state display
+## 7) Smoothing and display rules
 
-EMA smoothing:
+Base EMA:
 ```text
 smoothed = 0.3*new + 0.7*old
 ```
@@ -195,13 +267,19 @@ Applied to:
 - artefact score and quality confidence
 - meditation proxy / reward value
 
+Drowsiness display:
+- raw drowsiness evidence is additionally smoothed with `alpha = 0.15`
+- if a clean window is strongly settled and entropy is not suppressed, displayed drowsiness is capped at `0.45`
+
 Displayed discrete state:
-- switch after 3 consecutive updates with the same winner
-- or immediately when one smoothed probability exceeds 0.70
+- normal state switching still uses the hold smoother
+- `DROWSY` is stricter:
+  - 5 consecutive clean drowsy wins
+  - or one clean drowsy score above `0.80`
 
 ---
 
-## 7) Audio and game feedback
+## 8) Audio, game, and feedback source
 
 Default reward metric:
 ```text
@@ -209,10 +287,10 @@ MeditationProxy = Settledness * Alertness * QualityConfidence
 ```
 
 Behavioral rule:
-- drowsy or contaminated windows fade the reward down
+- drowsy or contaminated windows fade reward down
 - the system should never reward quiet sleep as if it were good meditation
 
-Selectable reward metrics in the current UI:
+Selectable shared feedback metrics:
 - `MeditationProxy`
 - `Settledness`
 - `Control`
@@ -220,27 +298,31 @@ Selectable reward metrics in the current UI:
 - `QualityConfidence`
 - `EffortfulFocusScore`
 
-Telemetry-only overlays:
-- eSense Meditation
-- eSense Attention
+Plot-only metrics:
+- `DrowsyScore`
+- `ArtefactScore`
+- `MindWanderingScore`
+- `eSense Meditation`
+- `eSense Attention`
+
+Audio behavior:
+- can be fully disabled
+- fades out on stop, disconnect, or audio-off
+- crackle remains the artefact channel
 
 ---
 
-## 8) Plotting and recording
+## 9) Plotting and recording
 
-Plot types:
-- raw EEG
-- meditation proxy
-- settledness
-- control
-- alertness
-- drowsy score
-- artefact score
-- quality confidence
-- effortful focus score
-- mind wandering score
-- eSense Meditation
-- eSense Attention
+Plot model:
+- raw EEG strip always visible, fixed 5-second window
+- metric explorer normalized to `0..100`
+- up to 4 simultaneous lines
+- default visible metrics:
+  - `MeditationProxy`
+  - `Alertness`
+  - `DrowsyScore`
+  - `ArtefactScore`
 
 Metric history:
 - 1 point per second
@@ -248,12 +330,12 @@ Metric history:
 
 Recording output:
 - `raw.raw16le` - signed int16 little-endian raw stream
-- `features.csv` - timestamps, raw feature values, z-scored features, artefact components, raw and smoothed probabilities, raw/displayed state labels, and final feedback values sent to audio/game
+- `features.csv` - timestamps, raw feature values, z-scored features, artefact components, artefact-profile terms, drowsiness evidence terms, raw and smoothed probabilities, raw/displayed state labels, and final feedback values sent to audio/game
 - `meta.txt` - session metadata
 
 ---
 
-## 9) Practical caveats
+## 10) Practical caveats
 
 - Single dry frontal electrode data is highly sensitive to contact quality, facial muscle activity, and eye blinks.
 - This app is a training aid, not a medical or spiritual measurement device.

@@ -29,6 +29,14 @@ data class QualityMetrics(
   val isCalibrationClean: Boolean,
 )
 
+data class ArtefactCalibrationProfile(
+  val blinkNormalizationHz: Float = 1.0f,
+  val emgNormalizationHfRatio: Float = 0.35f,
+  val eyeMotionBlinkPeakHz: Float = 0f,
+  val jawClenchHfPeakRatio: Float = 0f,
+  val frownHfPeakRatio: Float = 0f,
+)
+
 data class FeatureZScores(
   val logBeta: Float,
   val tbr: Float,
@@ -67,6 +75,7 @@ data class ClassifierOutput(
   val quality: QualityMetrics,
   val zScores: FeatureZScores,
   val probabilities: StateProbabilities,
+  val drowsinessEvidence: DrowsinessEvidence,
   val drowsyScore: Float,
   val settledScore: Float,
   val effortfulFocusScore: Float,
@@ -78,22 +87,39 @@ data class ClassifierOutput(
   val meditationProxy: Float,
 )
 
+data class DrowsinessEvidence(
+  val tarContribution: Float,
+  val tbrContribution: Float,
+  val entropyContribution: Float,
+  val abrContribution: Float,
+  val logit: Float,
+)
+
 class ScoreModel {
   private var calibration: Calibration? = null
+  private var artefactCalibrationProfile: ArtefactCalibrationProfile = ArtefactCalibrationProfile()
 
   fun reset() {
     calibration = null
+    artefactCalibrationProfile = ArtefactCalibrationProfile()
   }
 
   fun setCalibration(calibration: Calibration) {
     this.calibration = calibration
   }
 
+  fun setArtefactCalibrationProfile(profile: ArtefactCalibrationProfile) {
+    artefactCalibrationProfile = profile
+  }
+
   fun quality(poorSignal: Int, features: EegFeatures): QualityMetrics {
     val contact = clamp01(poorSignal / 50f)
     val line = clamp01(features.lineNoiseRatio * 5f)
-    val emg = clamp01((features.hfRatio - 0.10f) / 0.25f)
-    val blink = clamp01(features.blinkRateHz / 1.0f)
+    val personalizedEmgUpper = maxOf(0.35f, artefactCalibrationProfile.emgNormalizationHfRatio)
+    val personalizedEmgSpan = (personalizedEmgUpper - 0.10f).coerceAtLeast(0.15f)
+    val personalizedBlinkUpper = maxOf(1.0f, artefactCalibrationProfile.blinkNormalizationHz)
+    val emg = clamp01((features.hfRatio - 0.10f) / personalizedEmgSpan)
+    val blink = clamp01(features.blinkRateHz / personalizedBlinkUpper)
     val clip = clamp01(features.clipFraction / 0.01f)
     val stall = clamp01(features.maxGapMs / 500f)
     val artefactScore = clamp01(
@@ -144,7 +170,12 @@ class ScoreModel {
     val quality = quality(poorSignal = poorSignal, features = features)
     val z = zScores(features)
 
-    val d = sigmoid((1.3f * z.tar) + (0.9f * z.tbr) - (0.7f * z.entropy) - (0.4f * z.abr))
+    val tarContribution = 1.3f * z.tar
+    val tbrContribution = 0.9f * z.tbr
+    val entropyContribution = -0.7f * z.entropy
+    val abrContribution = -0.4f * z.abr
+    val drowsyLogit = tarContribution + tbrContribution + entropyContribution + abrContribution
+    val d = sigmoid(drowsyLogit)
     val m = sigmoid((1.0f * z.abr) - (0.6f * z.tar) + (0.4f * z.entropy) - (0.3f * z.emg))
     val f = sigmoid((-0.9f * z.abr) - (0.7f * z.tbr) + (0.4f * z.logBeta) - (0.2f * z.entropy))
     val w = sigmoid((0.9f * z.tbr) - (0.4f * z.abr) - (0.2f * z.entropy))
@@ -178,6 +209,13 @@ class ScoreModel {
       quality = quality,
       zScores = z,
       probabilities = cleanProbabilities,
+      drowsinessEvidence = DrowsinessEvidence(
+        tarContribution = tarContribution,
+        tbrContribution = tbrContribution,
+        entropyContribution = entropyContribution,
+        abrContribution = abrContribution,
+        logit = drowsyLogit,
+      ),
       drowsyScore = d,
       settledScore = m,
       effortfulFocusScore = f,

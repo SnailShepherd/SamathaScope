@@ -15,32 +15,37 @@ class AppUiTest {
   @Test
   fun tabLabels_areVisible() {
     composeRule.onNodeWithText("Dashboard").assertExists()
-    composeRule.onNodeWithText("Signals").assertExists()
+    composeRule.onNodeWithText("Settings").assertExists()
     composeRule.onNodeWithText("Game").assertExists()
     composeRule.onNodeWithText("Learn").assertExists()
   }
 
   @Test
-  fun learnTab_showsUpdatedClassifierCard() {
+  fun learnTab_showsCalibrationAndGlossaryContent() {
     composeRule.onNodeWithText("Learn").performClick()
-    composeRule.onNodeWithText("Frontal-state feedback proxy").assertExists()
+    composeRule.onNodeWithText("How calibration works").assertExists()
+    composeRule.onNodeWithText("Meditation Proxy (MP)").assertExists()
   }
 
   @Test
-  fun dashboardLivePlotSelection_staysSyncedAcrossTabs() {
+  fun dashboard_showsRawEegAndMetricExplorer() {
     composeRule.onNodeWithText("Dashboard").performClick()
-    composeRule.onNodeWithText("Meditation Proxy").performClick()
-    composeRule.onNodeWithText("Showing: Meditation Proxy").assertExists()
-
-    composeRule.onNodeWithText("Signals").performClick()
-    composeRule.onNodeWithText("Dashboard").performClick()
-
-    composeRule.onNodeWithText("Showing: Meditation Proxy").assertExists()
+    composeRule.onNodeWithText("Raw EEG").assertExists()
+    composeRule.onNodeWithText("Metric explorer").assertExists()
+    composeRule.onNodeWithText("Feedback source: Meditation Proxy").assertExists()
   }
 
   @Test
-  fun gameTab_opensLevitationScene() {
+  fun settingsTab_showsAudioControls() {
+    composeRule.onNodeWithText("Settings").performClick()
+    composeRule.onNodeWithText("Audio").assertExists()
+    composeRule.onNodeWithText("Enable audio feedback").assertExists()
+  }
+
+  @Test
+  fun gameTab_opensLanternScene() {
     composeRule.onNodeWithText("Game").performClick()
-    composeRule.onNodeWithText("Levitation scene").assertExists()
+    composeRule.onNodeWithText("Lantern scene").assertExists()
+    composeRule.onNodeWithText("Shared feedback source").assertExists()
   }
 }

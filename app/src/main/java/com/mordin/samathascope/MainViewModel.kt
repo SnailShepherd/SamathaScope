@@ -11,10 +11,12 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.util.LinkedHashSet
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sqrt
@@ -46,6 +48,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   private val contaminatedProbabilitySmoother = ExponentialSmoother(alpha = 0.3f)
   private val drowsyProbabilitySmoother = ExponentialSmoother(alpha = 0.3f)
+  private val displayedDrowsySmoother = ExponentialSmoother(alpha = 0.15f)
   private val settledProbabilitySmoother = ExponentialSmoother(alpha = 0.3f)
   private val effortfulFocusProbabilitySmoother = ExponentialSmoother(alpha = 0.3f)
   private val mindWanderingProbabilitySmoother = ExponentialSmoother(alpha = 0.3f)
@@ -58,6 +61,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   private val meditationProxySmoother = ExponentialSmoother(alpha = 0.3f)
   private val stateHoldSmoother = StateHoldSmoother()
 
+  private val artefactPromptOrder = listOf(
+    ArtefactPrompt.LOOK_LEFT_RIGHT,
+    ArtefactPrompt.LOOK_UP_DOWN,
+    ArtefactPrompt.JAW_CLENCH,
+    ArtefactPrompt.FROWN,
+    ArtefactPrompt.RELAX,
+  )
+
   private var statsSumMeditationProxy = 0f
   private var statsCount = 0
   private var timeMeditationProxyOver80Ms = 0L
@@ -67,11 +78,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   private var pausedAtMs: Long = 0L
   private var pausedAccumMs: Long = 0L
   private var sessionJob: Job? = null
+  private var audioStopJob: Job? = null
 
   private var audio: NoiseAudioEngine? = null
   private var recorder: SessionRecorder? = null
 
-  private var lastSampleAtMs: Long = 0L
   private var rawCountThisSecond = 0
   private var lastRateTickMs: Long = 0L
   private var rawPreviewDecim = 0
@@ -81,15 +92,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   private var calibrationRawCount = 0
   private var calibrationRawMean = 0.0
   private var calibrationRawM2 = 0.0
+  private var artefactPromptIndex = 0
+  private var artefactPromptStartMs = 0L
+  private var artefactCalibrationProfile = ArtefactCalibrationProfile()
+  private var drowsyDisplayWins = 0
 
   init {
     eegProcessor.setNotchEnabled(_ui.value.notch50Enabled)
+    scorer.setArtefactCalibrationProfile(artefactCalibrationProfile)
     if (Build.VERSION.SDK_INT < 31) {
       _ui.update { it.copy(btPermissionGranted = true) }
       refreshBondedDevices()
     }
-    refreshSelectedPlotSeries()
     refreshRawPreview()
+    refreshMetricPlotSeries()
   }
 
   fun onPermissionsResult(result: Map<String, Boolean>) {
@@ -106,9 +122,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       BondedDevice(mac = it.address, display = "${it.name ?: "Unknown"} (${it.address})")
     } ?: emptyList()
 
-    _ui.update { it.copy(bondedDevices = bonded) }
-    if (_ui.value.selectedDeviceMac == null && bonded.isNotEmpty()) {
-      _ui.update { it.copy(selectedDeviceMac = bonded.first().mac) }
+    _ui.update { state ->
+      state.copy(
+        bondedDevices = bonded,
+        selectedDeviceMac = state.selectedDeviceMac ?: bonded.firstOrNull()?.mac,
+      )
     }
   }
 
@@ -118,10 +136,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   fun selectTab(tab: AppTab) {
     _ui.update { it.copy(selectedTab = tab) }
-  }
-
-  fun setSettingsPanelVisible(visible: Boolean) {
-    _ui.update { it.copy(settingsPanelVisible = visible) }
   }
 
   fun connect() {
@@ -152,16 +166,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   }
 
   fun startSession() {
-    if (_ui.value.sessionRunning) return
-    if (!_ui.value.connected) return
+    if (_ui.value.sessionRunning || !_ui.value.connected) return
 
     eegProcessor.reset()
     eegProcessor.setNotchEnabled(_ui.value.notch50Enabled)
     calibration.reset()
     scorer.reset()
+    artefactCalibrationProfile = ArtefactCalibrationProfile()
+    scorer.setArtefactCalibrationProfile(artefactCalibrationProfile)
     metricHistory.reset()
     resetRawCalibrationStats()
     resetSmoothers()
+    calibration.resetArtefactCapture()
 
     statsSumMeditationProxy = 0f
     statsCount = 0
@@ -169,6 +185,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     lastFeatureTsMs = 0L
     lastGameUpdateMs = 0L
     lastAdaptiveCalibrationUpdateMs = 0L
+    artefactPromptIndex = 0
+    artefactPromptStartMs = 0L
 
     sessionStartMs = System.currentTimeMillis()
     pausedAtMs = 0L
@@ -178,9 +196,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       val (yMin, yMax) = PlotMath.defaultRawRange()
       updatePlotSettings(
         type = PlotType.RAW,
-        newSettings = _ui.value.plotSettings.getValue(PlotType.RAW).copy(yMin = yMin, yMax = yMax, isUserLocked = false),
+        newSettings = _ui.value.plotSettings.getValue(PlotType.RAW).copy(
+          yMin = yMin,
+          yMax = yMax,
+          isUserLocked = false,
+        ),
         persist = true,
-        refresh = false,
       )
     }
 
@@ -192,17 +213,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       _ui.update { it.copy(lastRecordingPath = null) }
     }
 
-    audio = NoiseAudioEngine().apply {
-      start()
-      setMuted(true)
-    }
+    startAudioEngineIfNeeded()
 
     _ui.update {
       it.copy(
         sessionRunning = true,
         sessionPaused = false,
         calibrating = true,
+        calibrationPhase = CalibrationPhase.EYES_OPEN,
+        calibrationInstruction = calibrationInstructionFor(CalibrationPhase.EYES_OPEN),
         calibrationRemainingSec = calibration.calibrationSeconds,
+        artefactCalibrationState = ArtefactCalibrationUiState(),
         sessionElapsedSec = 0,
         meditationProxy = 0f,
         settledness = 0f,
@@ -214,46 +235,54 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         effortfulFocusScore = 0f,
         mindWanderingScore = 0f,
         displayedStateLabel = StateLabel.UNCERTAIN,
+        drowsyTarContribution = 0f,
+        drowsyTbrContribution = 0f,
+        drowsyEntropyContribution = 0f,
+        drowsyAbrContribution = 0f,
         avgMeditationProxy = 0f,
         timeMeditationProxyOver80Seconds = 0,
-        audioRunning = true,
+        audioRunning = audio != null && it.audioEnabled,
         audioMuted = true,
-        plotHistory = emptyList(),
-        gameState = it.gameState.copy(altitude = 0.5f, velocity = 0f),
-        gameHudState = it.gameHudState.copy(metricValuePercent = 0, artefactPercent = 0, stateLabel = StateLabel.UNCERTAIN),
+        metricPlotSeries = emptyMap(),
+        gameState = GameState(altitude = 0.5f, velocity = 0f),
+        gameHudState = it.gameHudState.copy(
+          metricValuePercent = 0,
+          artefactPercent = 0,
+          stateLabel = StateLabel.UNCERTAIN,
+        ),
       )
     }
 
     refreshRawPreview()
-    refreshSelectedPlotSeries()
+    refreshMetricPlotSeries()
 
     sessionJob = viewModelScope.launch(Dispatchers.Default) {
       while (_ui.value.sessionRunning) {
         val now = System.currentTimeMillis()
-        val rem = calibration.remainingSeconds()
         val elapsedMs = now - sessionStartMs - pausedAccumMs - if (_ui.value.sessionPaused) (now - pausedAtMs) else 0L
         val elapsedSec = (elapsedMs / 1000L).toInt().coerceAtLeast(0)
 
-        _ui.update {
-          it.copy(
-            calibrationRemainingSec = rem,
-            sessionElapsedSec = elapsedSec,
-          )
+        if (_ui.value.calibrating) {
+          val rem = calibration.remainingSeconds()
+          val phase = if (rem > 30) CalibrationPhase.EYES_OPEN else CalibrationPhase.EYES_CLOSED
+          _ui.update {
+            it.copy(
+              calibrationRemainingSec = rem,
+              calibrationPhase = phase,
+              calibrationInstruction = calibrationInstructionFor(phase),
+              sessionElapsedSec = elapsedSec,
+            )
+          }
+          if (calibration.isDone()) {
+            finishCleanCalibration(now)
+          }
+        } else if (_ui.value.artefactCalibrationState.running) {
+          updateArtefactCaptureUi(now, elapsedSec)
+        } else {
+          _ui.update { it.copy(sessionElapsedSec = elapsedSec) }
         }
 
-        if (calibration.isDone() && _ui.value.calibrating) {
-          scorer.setCalibration(calibration.buildCalibration())
-          calibration.seedAdaptiveWindowFromCalibration()
-          lastAdaptiveCalibrationUpdateMs = now
-          applyCalibratedRawRangeIfNeeded()
-          _ui.update { it.copy(calibrating = false) }
-
-          audio?.beginFadeIn()
-          audio?.setMuted(false)
-          _ui.update { it.copy(audioMuted = false) }
-        }
-
-        kotlinx.coroutines.delay(200)
+        delay(200)
       }
     }
   }
@@ -262,18 +291,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     sessionJob?.cancel()
     sessionJob = null
 
-    audio?.stop()
-    audio = null
+    muteAudioAndStopLater()
 
     recorder?.stop()
     recorder = null
+    calibration.resetArtefactCapture()
+    artefactPromptIndex = 0
+    artefactPromptStartMs = 0L
 
     _ui.update {
       it.copy(
         sessionRunning = false,
         sessionPaused = false,
         calibrating = false,
+        calibrationPhase = null,
+        calibrationInstruction = "",
         calibrationRemainingSec = 0,
+        artefactCalibrationState = ArtefactCalibrationUiState(),
         sessionElapsedSec = 0,
         audioRunning = false,
         audioMuted = true,
@@ -284,17 +318,66 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   fun togglePause() {
     if (!_ui.value.sessionRunning) return
     val now = System.currentTimeMillis()
-    val paused = _ui.value.sessionPaused
-    if (!paused) {
+    if (!_ui.value.sessionPaused) {
       pausedAtMs = now
-      audio?.setMuted(true)
       _ui.update { it.copy(sessionPaused = true, audioMuted = true) }
+      syncAudioState()
     } else {
       pausedAccumMs += (now - pausedAtMs).coerceAtLeast(0L)
       pausedAtMs = 0L
-      val shouldUnmute = !_ui.value.calibrating
-      audio?.setMuted(!shouldUnmute)
-      _ui.update { it.copy(sessionPaused = false, audioMuted = !shouldUnmute) }
+      _ui.update { it.copy(sessionPaused = false) }
+      syncAudioState()
+    }
+  }
+
+  fun toggleVisibleMetric(type: PlotType) {
+    if (type == PlotType.RAW) return
+    val next = LinkedHashSet(_ui.value.visibleMetrics)
+    if (next.contains(type)) {
+      if (next.size > 1) next.remove(type)
+    } else {
+      if (next.size >= 4) {
+        val first = next.firstOrNull()
+        if (first != null) next.remove(first)
+      }
+      next.add(type)
+    }
+    _ui.update { it.copy(visibleMetrics = next, selectedMetricInfo = type) }
+    refreshMetricPlotSeries()
+  }
+
+  fun focusMetricInfo(type: PlotType) {
+    _ui.update { it.copy(selectedMetricInfo = type) }
+  }
+
+  fun setFeedbackMetric(value: PlotType) {
+    if (!rewardSelectableMetrics().contains(value)) return
+    val visible = LinkedHashSet(_ui.value.visibleMetrics)
+    if (!visible.contains(value)) {
+      if (visible.size >= 4) {
+        val first = visible.firstOrNull()
+        if (first != null) visible.remove(first)
+      }
+      visible.add(value)
+    }
+    _ui.update {
+      it.copy(
+        feedbackMetric = value,
+        selectedMetricInfo = value,
+        visibleMetrics = visible,
+      )
+    }
+    refreshMetricPlotSeries()
+  }
+
+  fun setAudioEnabled(value: Boolean) {
+    _ui.update { it.copy(audioEnabled = value) }
+    if (value) {
+      startAudioEngineIfNeeded()
+      syncAudioState(fadeIn = true)
+    } else {
+      _ui.update { it.copy(audioRunning = false, audioMuted = true) }
+      muteAudioAndStopLater()
     }
   }
 
@@ -317,92 +400,76 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     _ui.update { it.copy(notch50Enabled = value) }
   }
 
-  fun setFeedbackMetric(value: PlotType) {
-    if (!rewardSelectableMetrics().contains(value)) return
-    _ui.update { it.copy(feedbackMetric = value) }
+  fun setMetricWindowSeconds(seconds: Int) {
+    val normalized = seconds.coerceIn(60, 600)
+    val updated = _ui.value.plotSettings.mapValues { (type, settings) ->
+      if (type == PlotType.RAW) settings else settings.copy(windowSeconds = normalized)
+    }
+    _ui.update { it.copy(plotSettings = updated) }
+    for ((type, settings) in updated) {
+      plotSettingsStore.save(type, settings)
+    }
+    refreshMetricPlotSeries()
   }
 
-  fun setGameMetric(value: PlotType) {
-    if (!rewardSelectableMetrics().contains(value)) return
-    _ui.update { state ->
-      state.copy(
-        gameState = state.gameState.copy(metric = value)
+  fun startArtefactCalibration() {
+    if (!_ui.value.sessionRunning || _ui.value.calibrating) return
+    calibration.resetArtefactCapture()
+    artefactPromptIndex = 0
+    artefactPromptStartMs = System.currentTimeMillis()
+    _ui.update {
+      it.copy(
+        artefactCalibrationState = ArtefactCalibrationUiState(
+          available = true,
+          running = true,
+          completed = false,
+          skipped = false,
+          prompt = artefactPromptOrder.first(),
+          promptLabel = artefactPromptLabel(artefactPromptOrder.first()),
+          remainingSec = 5,
+          completedPrompts = 0,
+        ),
+        selectedMetricInfo = PlotType.ARTEFACT_SCORE,
+      )
+    }
+    syncAudioState()
+  }
+
+  fun dismissArtefactCalibrationOffer() {
+    _ui.update {
+      it.copy(
+        artefactCalibrationState = it.artefactCalibrationState.copy(
+          available = true,
+          dismissed = true,
+        )
       )
     }
   }
 
-  fun setPlotType(value: PlotType) {
-    _ui.update { it.copy(plotType = value) }
-    if (value == PlotType.RAW) {
-      refreshRawPreview()
+  fun skipArtefactCalibration() {
+    _ui.update {
+      it.copy(
+        artefactCalibrationState = it.artefactCalibrationState.copy(
+          available = false,
+          dismissed = false,
+          skipped = true,
+          running = false,
+          prompt = null,
+          promptLabel = "",
+          remainingSec = 0,
+        )
+      )
     }
-    refreshSelectedPlotSeries()
-  }
-
-  fun setPlotWindowSeconds(type: PlotType, seconds: Int) {
-    val base = _ui.value.plotSettings.getValue(type)
-    val normalized = when (type) {
-      PlotType.RAW -> seconds.coerceIn(3, 20)
-      else -> seconds.coerceIn(60, 600)
-    }
-    updatePlotSettings(
-      type = type,
-      newSettings = base.copy(windowSeconds = normalized),
-      persist = true,
-      refresh = true,
-    )
-  }
-
-  fun setPlotYMin(type: PlotType, yMin: Float) {
-    val base = _ui.value.plotSettings.getValue(type)
-    val lowerBound = when (type) {
-      PlotType.RAW -> -4000f
-      else -> 0f
-    }
-    val upperBound = when (type) {
-      PlotType.RAW -> base.yMax - 50f
-      else -> base.yMax - 1f
-    }
-    val clamped = yMin.coerceIn(lowerBound, upperBound)
-    updatePlotSettings(
-      type = type,
-      newSettings = base.copy(yMin = clamped, isUserLocked = true),
-      persist = true,
-      refresh = true,
-    )
-  }
-
-  fun setPlotYMax(type: PlotType, yMax: Float) {
-    val base = _ui.value.plotSettings.getValue(type)
-    val lowerBound = when (type) {
-      PlotType.RAW -> base.yMin + 50f
-      else -> base.yMin + 1f
-    }
-    val upperBound = when (type) {
-      PlotType.RAW -> 4000f
-      else -> 100f
-    }
-    val clamped = yMax.coerceIn(lowerBound, upperBound)
-    updatePlotSettings(
-      type = type,
-      newSettings = base.copy(yMax = clamped, isUserLocked = true),
-      persist = true,
-      refresh = true,
-    )
-  }
-
-  fun resetPlotSettings(type: PlotType) {
-    val defaults = defaultPlotSettings().getValue(type)
-    updatePlotSettings(type = type, newSettings = defaults, persist = true, refresh = true)
+    syncAudioState()
   }
 
   fun testBeep() {
     viewModelScope.launch(Dispatchers.Default) {
       try {
-        val tg = ToneGenerator(AudioManager.STREAM_MUSIC, 90)
+        val tg = ToneGenerator(AudioManager.STREAM_MUSIC, 80)
         try {
-          tg.startTone(ToneGenerator.TONE_PROP_BEEP, 300)
-          kotlinx.coroutines.delay(350)
+          tg.startTone(ToneGenerator.TONE_PROP_BEEP, 220)
+          delay(250)
         } finally {
           tg.release()
         }
@@ -423,7 +490,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   private fun handleRawSample(raw: Int) {
     val now = System.currentTimeMillis()
-    lastSampleAtMs = now
 
     if (lastRateTickMs == 0L) lastRateTickMs = now
     rawCountThisSecond++
@@ -449,15 +515,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     if (!_ui.value.sessionRunning || _ui.value.sessionPaused) return
 
     val poorSignal = _ui.value.poorSignal
-    val output = scorer.classify(poorSignal = poorSignal, features = features)
-    val runningActive = _ui.value.sessionRunning && !_ui.value.sessionPaused
+    val quality = scorer.quality(poorSignal = poorSignal, features = features)
 
-    if (_ui.value.sessionRunning && _ui.value.calibrating) {
-      calibration.addSample(features = features, quality = output.quality)
-    } else if (runningActive && !_ui.value.calibrating) {
-      calibration.addAdaptiveSample(features = features, quality = output.quality)
-      maybeUpdateAdaptiveCalibration(now)
+    if (_ui.value.calibrating) {
+      calibration.addSample(features = features, quality = quality)
+      return
     }
+
+    if (_ui.value.artefactCalibrationState.running) {
+      _ui.value.artefactCalibrationState.prompt?.let { prompt ->
+        calibration.addArtefactSample(prompt = prompt, features = features)
+      }
+      return
+    }
+
+    val output = scorer.classify(poorSignal = poorSignal, features = features)
+    calibration.addAdaptiveSample(features = features, quality = output.quality)
+    maybeUpdateAdaptiveCalibration(now)
 
     val smoothedProbabilities = StateProbabilities(
       contaminated = contaminatedProbabilitySmoother.add(output.probabilities.contaminated),
@@ -473,22 +547,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val smoothedArtefact = artefactSmoother.add(output.quality.artefactScore)
     val smoothedQualityConfidence = qualityConfidenceSmoother.add(output.qualityConfidence)
     val smoothedMeditationProxy = meditationProxySmoother.add(output.meditationProxy)
+    val displayedDrowsy = displayedDrowsySmoother.add(cappedDisplayedDrowsy(output))
+    val gatedState = gatedDisplayState(output)
     val displayedState = stateHoldSmoother.update(
-      candidate = output.rawStateLabel,
-      confidence = smoothedProbabilities.valueFor(output.rawStateLabel),
+      candidate = gatedState,
+      confidence = smoothedProbabilities.valueFor(gatedState),
     )
 
-    if (runningActive) {
-      statsSumMeditationProxy += smoothedMeditationProxy
-      statsCount++
-      if (lastFeatureTsMs != 0L) {
-        val dt = (now - lastFeatureTsMs).coerceAtLeast(0L)
-        if (smoothedMeditationProxy >= 0.80f) {
-          timeMeditationProxyOver80Ms += dt
-        }
+    statsSumMeditationProxy += smoothedMeditationProxy
+    statsCount++
+    if (lastFeatureTsMs != 0L) {
+      val dt = (now - lastFeatureTsMs).coerceAtLeast(0L)
+      if (smoothedMeditationProxy >= 0.80f) {
+        timeMeditationProxyOver80Ms += dt
       }
-      lastFeatureTsMs = now
     }
+    lastFeatureTsMs = now
 
     metricHistory.add(
       mapOf(
@@ -496,7 +570,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         PlotType.SETTLEDNESS to smoothedSettledness,
         PlotType.CONTROL to smoothedControl,
         PlotType.ALERTNESS to smoothedAlertness,
-        PlotType.DROWSY_SCORE to smoothedProbabilities.drowsy,
+        PlotType.DROWSY_SCORE to displayedDrowsy,
         PlotType.ARTEFACT_SCORE to smoothedArtefact,
         PlotType.QUALITY_CONFIDENCE to smoothedQualityConfidence,
         PlotType.EFFORTFUL_FOCUS_SCORE to smoothedProbabilities.effortfulFocus,
@@ -516,7 +590,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       effortfulFocus = smoothedProbabilities.effortfulFocus,
     )
 
-    val shouldAudioRun = _ui.value.sessionRunning && !_ui.value.sessionPaused && !_ui.value.calibrating
+    startAudioEngineIfNeeded()
+    val shouldAudioRun = _ui.value.audioEnabled &&
+      _ui.value.sessionRunning &&
+      !_ui.value.sessionPaused &&
+      !_ui.value.calibrating &&
+      !_ui.value.artefactCalibrationState.running
+
     if (shouldAudioRun) {
       audio?.update(
         feedbackValue = feedback,
@@ -533,16 +613,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       audio?.setMuted(true)
     }
 
-    val gameMetricValue = rewardValueForType(
-      type = _ui.value.gameState.metric,
-      meditationProxy = smoothedMeditationProxy,
-      settledness = smoothedSettledness,
-      control = smoothedControl,
-      alertness = smoothedAlertness,
-      qualityConfidence = smoothedQualityConfidence,
-      effortfulFocus = smoothedProbabilities.effortfulFocus,
-    )
-
     val elapsedForGame = if (lastGameUpdateMs == 0L) {
       0.25f
     } else {
@@ -555,7 +625,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         altitude = _ui.value.gameState.altitude,
         velocity = _ui.value.gameState.velocity,
       ),
-      target = GamePhysics.metricToTargetHeight(gameMetricValue),
+      target = GamePhysics.metricToTargetHeight(feedback),
       dtSeconds = elapsedForGame,
     )
 
@@ -567,18 +637,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         features = features,
         zScores = output.zScores,
         quality = output.quality,
+        artefactCalibrationProfile = artefactCalibrationProfile,
         rawProbabilities = output.probabilities,
         smoothedProbabilities = smoothedProbabilities,
         rawStateLabel = output.rawStateLabel,
         displayedStateLabel = displayedState,
+        drowsinessEvidence = output.drowsinessEvidence,
+        displayedDrowsyScore = displayedDrowsy,
         alertness = smoothedAlertness,
         control = smoothedControl,
         settledness = smoothedSettledness,
         meditationProxy = smoothedMeditationProxy,
         feedbackMetric = _ui.value.feedbackMetric,
         feedbackValue = feedback,
-        gameMetric = _ui.value.gameState.metric,
-        gameValue = gameMetricValue,
+        gameMetric = _ui.value.feedbackMetric,
+        gameValue = feedback,
       )
     )
 
@@ -591,12 +664,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         settledness = smoothedSettledness,
         control = smoothedControl,
         alertness = smoothedAlertness,
-        drowsyScore = smoothedProbabilities.drowsy,
+        drowsyScore = displayedDrowsy,
         artefactScore = smoothedArtefact,
         qualityConfidence = smoothedQualityConfidence,
         effortfulFocusScore = smoothedProbabilities.effortfulFocus,
         mindWanderingScore = smoothedProbabilities.mindWandering,
         displayedStateLabel = displayedState,
+        drowsyTarContribution = output.drowsinessEvidence.tarContribution,
+        drowsyTbrContribution = output.drowsinessEvidence.tbrContribution,
+        drowsyEntropyContribution = output.drowsinessEvidence.entropyContribution,
+        drowsyAbrContribution = output.drowsinessEvidence.abrContribution,
         avgMeditationProxy = avgMeditationProxy,
         timeMeditationProxyOver80Seconds = over80Seconds,
         artefactContact = output.quality.contact,
@@ -605,8 +682,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         artefactBlink = output.quality.blink,
         artefactClip = output.quality.clip,
         artefactStall = output.quality.stall,
+        artefactBlinkNormalizationHz = artefactCalibrationProfile.blinkNormalizationHz,
+        artefactEmgNormalizationHfRatio = artefactCalibrationProfile.emgNormalizationHfRatio,
         streamStallMs = features.maxGapMs,
-        audioRunning = audio != null,
+        audioRunning = audio != null && it.audioEnabled,
         audioMuted = !shouldAudioRun,
         audioBaseDb = audio?.debugBaseDb ?: it.audioBaseDb,
         gameState = it.gameState.copy(
@@ -614,7 +693,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
           velocity = nextLevitation.velocity,
         ),
         gameHudState = it.gameHudState.copy(
-          metricValuePercent = (gameMetricValue * 100f).toInt().coerceIn(0, 100),
+          metricValuePercent = (feedback * 100f).toInt().coerceIn(0, 100),
           artefactPercent = (smoothedArtefact * 100f).toInt().coerceIn(0, 100),
           poorSignal = poorSignal,
           elapsedSeconds = it.sessionElapsedSec,
@@ -624,13 +703,113 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       )
     }
 
-    refreshSelectedPlotSeries()
+    refreshMetricPlotSeries()
+  }
+
+  private fun finishCleanCalibration(now: Long) {
+    scorer.setCalibration(calibration.buildCalibration())
+    calibration.seedAdaptiveWindowFromCalibration()
+    lastAdaptiveCalibrationUpdateMs = now
+    applyCalibratedRawRangeIfNeeded()
+
+    _ui.update {
+      it.copy(
+        calibrating = false,
+        calibrationPhase = CalibrationPhase.BASELINE_COMPLETE,
+        calibrationInstruction = calibrationInstructionFor(CalibrationPhase.BASELINE_COMPLETE),
+        artefactCalibrationState = ArtefactCalibrationUiState(available = true),
+      )
+    }
+
+    if (_ui.value.audioEnabled) {
+      BellSoundPlayer.playCalibrationComplete()
+    }
+    syncAudioState(fadeIn = true)
+  }
+
+  private fun updateArtefactCaptureUi(now: Long, elapsedSec: Int) {
+    val elapsedPromptMs = now - artefactPromptStartMs
+    if (elapsedPromptMs >= 5_000L) {
+      artefactPromptIndex++
+      if (artefactPromptIndex >= artefactPromptOrder.size) {
+        artefactCalibrationProfile = calibration.buildArtefactCalibrationProfile()
+        scorer.setArtefactCalibrationProfile(artefactCalibrationProfile)
+        _ui.update {
+          it.copy(
+            sessionElapsedSec = elapsedSec,
+            artefactCalibrationState = it.artefactCalibrationState.copy(
+              available = false,
+              dismissed = false,
+              running = false,
+              completed = true,
+              prompt = null,
+              promptLabel = "",
+              remainingSec = 0,
+              completedPrompts = artefactPromptOrder.size,
+            ),
+            artefactBlinkNormalizationHz = artefactCalibrationProfile.blinkNormalizationHz,
+            artefactEmgNormalizationHfRatio = artefactCalibrationProfile.emgNormalizationHfRatio,
+          )
+        }
+        syncAudioState(fadeIn = true)
+        return
+      }
+      artefactPromptStartMs = now
+    }
+
+    val prompt = artefactPromptOrder[artefactPromptIndex]
+    val remainingSec = (5 - (elapsedPromptMs / 1000L).toInt()).coerceIn(1, 5)
+    _ui.update {
+      it.copy(
+        sessionElapsedSec = elapsedSec,
+        artefactCalibrationState = it.artefactCalibrationState.copy(
+          available = true,
+          dismissed = false,
+          running = true,
+          completed = false,
+          prompt = prompt,
+          promptLabel = artefactPromptLabel(prompt),
+          remainingSec = remainingSec,
+          completedPrompts = artefactPromptIndex,
+        )
+      )
+    }
   }
 
   private fun maybeUpdateAdaptiveCalibration(now: Long) {
     if (now - lastAdaptiveCalibrationUpdateMs < 1000L) return
     calibration.buildAdaptiveCalibration()?.let { scorer.setCalibration(it) }
     lastAdaptiveCalibrationUpdateMs = now
+  }
+
+  private fun cappedDisplayedDrowsy(output: ClassifierOutput): Float {
+    val entropyNotSuppressed = output.zScores.entropy > -0.30f
+    val calmSettledWindow = !output.quality.isContaminated &&
+      output.settledness > 0.60f &&
+      output.qualityConfidence > 0.70f &&
+      entropyNotSuppressed
+    return if (calmSettledWindow) {
+      min(output.drowsyScore, 0.45f)
+    } else {
+      output.drowsyScore
+    }
+  }
+
+  private fun gatedDisplayState(output: ClassifierOutput): StateLabel {
+    if (output.rawStateLabel != StateLabel.DROWSY) {
+      drowsyDisplayWins = 0
+      return output.rawStateLabel
+    }
+    if (output.quality.isContaminated) {
+      drowsyDisplayWins = 0
+      return StateLabel.SIGNAL_CONTAMINATED
+    }
+    drowsyDisplayWins++
+    return if (output.drowsyScore > 0.80f || drowsyDisplayWins >= 5) {
+      StateLabel.DROWSY
+    } else {
+      StateLabel.UNCERTAIN
+    }
   }
 
   private fun rewardValueForType(
@@ -653,22 +832,67 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
   }
 
-  private fun rewardSelectableMetrics(): Set<PlotType> {
-    return setOf(
-      PlotType.MEDITATION_PROXY,
-      PlotType.SETTLEDNESS,
-      PlotType.CONTROL,
-      PlotType.ALERTNESS,
-      PlotType.QUALITY_CONFIDENCE,
-      PlotType.EFFORTFUL_FOCUS_SCORE,
-    )
+  private fun rewardSelectableMetrics(): Set<PlotType> = MetricGlossary.feedbackSourceMetrics().toSet()
+
+  private fun startAudioEngineIfNeeded() {
+    if (!_ui.value.audioEnabled) return
+    cancelPendingAudioStop()
+    if (audio == null) {
+      audio = NoiseAudioEngine().apply {
+        start()
+        setMuted(true)
+      }
+    }
+  }
+
+  private fun cancelPendingAudioStop() {
+    audioStopJob?.cancel()
+    audioStopJob = null
+  }
+
+  private fun muteAudioAndStopLater() {
+    val engine = audio ?: return
+    cancelPendingAudioStop()
+    engine.setMuted(true)
+    audioStopJob = viewModelScope.launch(Dispatchers.Default) {
+      delay(700)
+      if (audio === engine) {
+        engine.stop()
+        audio = null
+      }
+    }
+  }
+
+  private fun syncAudioState(fadeIn: Boolean = false) {
+    val engine = audio
+    if (engine == null) {
+      _ui.update { it.copy(audioRunning = false, audioMuted = true) }
+      return
+    }
+    val shouldBeAudible = _ui.value.audioEnabled &&
+      _ui.value.sessionRunning &&
+      !_ui.value.sessionPaused &&
+      !_ui.value.calibrating &&
+      !_ui.value.artefactCalibrationState.running
+    if (shouldBeAudible) {
+      cancelPendingAudioStop()
+      if (fadeIn) engine.beginFadeIn()
+      engine.setMuted(false)
+    } else {
+      engine.setMuted(true)
+    }
+    _ui.update {
+      it.copy(
+        audioRunning = audio != null && it.audioEnabled,
+        audioMuted = !shouldBeAudible,
+      )
+    }
   }
 
   private fun updatePlotSettings(
     type: PlotType,
     newSettings: PlotSettings,
     persist: Boolean,
-    refresh: Boolean,
   ) {
     _ui.update { state ->
       state.copy(
@@ -677,12 +901,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
     if (persist) {
       plotSettingsStore.save(type, newSettings)
-    }
-    if (refresh) {
-      if (type == PlotType.RAW) {
-        refreshRawPreview()
-      }
-      refreshSelectedPlotSeries()
     }
   }
 
@@ -693,22 +911,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     _ui.update { it.copy(rawPreview = values) }
   }
 
-  private fun refreshSelectedPlotSeries() {
-    val plotType = _ui.value.plotType
-    if (plotType == PlotType.RAW) {
-      _ui.update { it.copy(plotHistory = emptyList()) }
-      return
+  private fun refreshMetricPlotSeries() {
+    val windowSeconds = _ui.value.plotSettings.getValue(PlotType.MEDITATION_PROXY).windowSeconds
+    val series = _ui.value.visibleMetrics.associateWith { type ->
+      convertSeriesForDisplay(type, metricHistory.series(type, windowSeconds))
     }
-    val windowSeconds = _ui.value.plotSettings.getValue(plotType).windowSeconds
-    val series = metricHistory.series(plotType, windowSeconds)
-    _ui.update { it.copy(plotHistory = convertSeriesForDisplay(plotType, series)) }
+    _ui.update { it.copy(metricPlotSeries = series) }
   }
 
   private fun convertSeriesForDisplay(type: PlotType, values: List<Float>): List<Float> {
     return when (type) {
       PlotType.ESENSE_MEDITATION,
       PlotType.ESENSE_ATTENTION -> values.map { it.coerceIn(0f, 100f) }
-      PlotType.RAW -> values
       else -> values.map { (it * 100f).coerceIn(0f, 100f) }
     }
   }
@@ -716,6 +930,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   private fun resetSmoothers() {
     contaminatedProbabilitySmoother.reset()
     drowsyProbabilitySmoother.reset()
+    displayedDrowsySmoother.reset()
     settledProbabilitySmoother.reset()
     effortfulFocusProbabilitySmoother.reset()
     mindWanderingProbabilitySmoother.reset()
@@ -727,6 +942,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     qualityConfidenceSmoother.reset()
     meditationProxySmoother.reset()
     stateHoldSmoother.reset()
+    drowsyDisplayWins = 0
   }
 
   private fun resetRawCalibrationStats() {
@@ -753,7 +969,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       type = PlotType.RAW,
       newSettings = current.copy(yMin = yMin, yMax = yMax, isUserLocked = false),
       persist = true,
-      refresh = true,
     )
+    refreshRawPreview()
+  }
+
+  private fun calibrationInstructionFor(phase: CalibrationPhase): String {
+    return when (phase) {
+      CalibrationPhase.EYES_OPEN -> ctx.getString(R.string.calibration_phase_eyes_open)
+      CalibrationPhase.EYES_CLOSED -> ctx.getString(R.string.calibration_phase_eyes_closed)
+      CalibrationPhase.BASELINE_COMPLETE -> ctx.getString(R.string.calibration_phase_complete)
+    }
+  }
+
+  private fun artefactPromptLabel(prompt: ArtefactPrompt): String {
+    return when (prompt) {
+      ArtefactPrompt.LOOK_LEFT_RIGHT -> ctx.getString(R.string.artifact_prompt_look_left_right)
+      ArtefactPrompt.LOOK_UP_DOWN -> ctx.getString(R.string.artifact_prompt_look_up_down)
+      ArtefactPrompt.JAW_CLENCH -> ctx.getString(R.string.artifact_prompt_jaw_clench)
+      ArtefactPrompt.FROWN -> ctx.getString(R.string.artifact_prompt_frown)
+      ArtefactPrompt.RELAX -> ctx.getString(R.string.artifact_prompt_relax)
+    }
   }
 }

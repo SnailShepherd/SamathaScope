@@ -17,9 +17,23 @@ enum class PlotType {
 
 enum class AppTab {
   DASHBOARD,
-  SIGNALS,
+  SETTINGS,
   GAME,
   LEARN,
+}
+
+enum class CalibrationPhase {
+  EYES_OPEN,
+  EYES_CLOSED,
+  BASELINE_COMPLETE,
+}
+
+enum class ArtefactPrompt {
+  LOOK_LEFT_RIGHT,
+  LOOK_UP_DOWN,
+  JAW_CLENCH,
+  FROWN,
+  RELAX,
 }
 
 data class PlotSettings(
@@ -35,7 +49,6 @@ data class BondedDevice(
 )
 
 data class GameState(
-  val metric: PlotType = PlotType.MEDITATION_PROXY,
   val altitude: Float = 0.5f,
   val velocity: Float = 0f,
 )
@@ -49,9 +62,21 @@ data class GameHudState(
   val stateLabel: StateLabel = StateLabel.UNCERTAIN,
 )
 
+data class ArtefactCalibrationUiState(
+  val available: Boolean = false,
+  val dismissed: Boolean = false,
+  val running: Boolean = false,
+  val completed: Boolean = false,
+  val skipped: Boolean = false,
+  val prompt: ArtefactPrompt? = null,
+  val promptLabel: String = "",
+  val remainingSec: Int = 0,
+  val completedPrompts: Int = 0,
+  val totalPrompts: Int = ArtefactPrompt.entries.size,
+)
+
 data class UiState(
   val selectedTab: AppTab = AppTab.DASHBOARD,
-  val settingsPanelVisible: Boolean = false,
 
   val btPermissionGranted: Boolean = false,
   val bondedDevices: List<BondedDevice> = emptyList(),
@@ -67,14 +92,18 @@ data class UiState(
 
   val rawPreview: List<Int> = emptyList(),
 
-  val plotType: PlotType = PlotType.RAW,
-  val plotHistory: List<Float> = emptyList(),
+  val visibleMetrics: Set<PlotType> = defaultVisibleMetrics(),
+  val selectedMetricInfo: PlotType = PlotType.MEDITATION_PROXY,
+  val metricPlotSeries: Map<PlotType, List<Float>> = emptyMap(),
   val plotSettings: Map<PlotType, PlotSettings> = defaultPlotSettings(),
 
   val sessionRunning: Boolean = false,
   val sessionPaused: Boolean = false,
   val calibrating: Boolean = false,
+  val calibrationPhase: CalibrationPhase? = null,
+  val calibrationInstruction: String = "",
   val calibrationRemainingSec: Int = 0,
+  val artefactCalibrationState: ArtefactCalibrationUiState = ArtefactCalibrationUiState(),
   val sessionElapsedSec: Int = 0,
 
   val meditationProxy: Float = 0f,
@@ -87,6 +116,10 @@ data class UiState(
   val mindWanderingScore: Float = 0f,
   val effortfulFocusScore: Float = 0f,
   val displayedStateLabel: StateLabel = StateLabel.UNCERTAIN,
+  val drowsyTarContribution: Float = 0f,
+  val drowsyTbrContribution: Float = 0f,
+  val drowsyEntropyContribution: Float = 0f,
+  val drowsyAbrContribution: Float = 0f,
 
   val avgMeditationProxy: Float = 0f,
   val timeMeditationProxyOver80Seconds: Int = 0,
@@ -97,9 +130,12 @@ data class UiState(
   val artefactBlink: Float = 0f,
   val artefactClip: Float = 0f,
   val artefactStall: Float = 0f,
+  val artefactBlinkNormalizationHz: Float = 1f,
+  val artefactEmgNormalizationHfRatio: Float = 0.35f,
 
   val feedbackMetric: PlotType = PlotType.MEDITATION_PROXY,
 
+  val audioEnabled: Boolean = true,
   val invertReward: Boolean = false,
   val crackleEnabled: Boolean = true,
   val gamma: Float = 1.6f,
@@ -117,6 +153,13 @@ data class UiState(
 
   val gameState: GameState = GameState(),
   val gameHudState: GameHudState = GameHudState(),
+)
+
+fun defaultVisibleMetrics(): Set<PlotType> = linkedSetOf(
+  PlotType.MEDITATION_PROXY,
+  PlotType.ALERTNESS,
+  PlotType.DROWSY_SCORE,
+  PlotType.ARTEFACT_SCORE,
 )
 
 fun defaultPlotSettings(): Map<PlotType, PlotSettings> {

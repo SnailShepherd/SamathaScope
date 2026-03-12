@@ -11,6 +11,9 @@ class SessionRecorderCsvTest {
 
     assertThat(header).contains("meditation_proxy")
     assertThat(header).contains("displayed_state_label")
+    assertThat(header).contains("artefact_blink_norm_hz")
+    assertThat(header).contains("d_logit")
+    assertThat(header).contains("displayed_drowsy_score")
     assertThat(header).contains("feedback_value")
     assertThat(header).contains("game_value")
   }
@@ -24,10 +27,25 @@ class SessionRecorderCsvTest {
       features = feature(),
       zScores = FeatureZScores(logBeta = 0.1f, tbr = 0.2f, tar = 0.3f, abr = 0.4f, entropy = 0.5f, emg = 0.6f),
       quality = quality(),
+      artefactCalibrationProfile = ArtefactCalibrationProfile(
+        blinkNormalizationHz = 1.25f,
+        emgNormalizationHfRatio = 0.42f,
+        eyeMotionBlinkPeakHz = 2.0f,
+        jawClenchHfPeakRatio = 0.7f,
+        frownHfPeakRatio = 0.6f,
+      ),
       rawProbabilities = StateProbabilities(0.1f, 0.2f, 0.7f, 0.1f, 0.1f, 0.0f),
       smoothedProbabilities = StateProbabilities(0.2f, 0.3f, 0.8f, 0.2f, 0.1f, 0.0f),
       rawStateLabel = StateLabel.SETTLED,
       displayedStateLabel = StateLabel.SETTLED,
+      drowsinessEvidence = DrowsinessEvidence(
+        tarContribution = 0.39f,
+        tbrContribution = 0.18f,
+        entropyContribution = -0.21f,
+        abrContribution = -0.16f,
+        logit = 0.20f,
+      ),
+      displayedDrowsyScore = 0.28f,
       alertness = 0.9f,
       control = 0.8f,
       settledness = 0.7f,
@@ -43,6 +61,8 @@ class SessionRecorderCsvTest {
     assertThat(csv).contains("SETTLED")
     assertThat(csv).contains("MEDITATION_PROXY")
     assertThat(csv).contains("CONTROL")
+    assertThat(csv).contains("1.250000")
+    assertThat(csv).contains("0.200000")
   }
 
   private fun feature(): EegFeatures {

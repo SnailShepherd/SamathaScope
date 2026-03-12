@@ -36,6 +36,11 @@ data class CalibrationFeatureSample(
   val quality: QualityMetrics,
 )
 
+data class ArtefactCalibrationSample(
+  val prompt: ArtefactPrompt,
+  val features: EegFeatures,
+)
+
 class CalibrationManager(
   val calibrationSeconds: Int = 60,
   private val pointsPerSecond: Int = 1,
@@ -48,12 +53,14 @@ class CalibrationManager(
 
   private val adaptiveCapacity = (adaptiveWindowSeconds * pointsPerSecond).coerceAtLeast(20)
   private val adaptiveSamples = ArrayDeque<CalibrationFeatureSample>(adaptiveCapacity)
+  private val artefactSamples = ArrayList<ArtefactCalibrationSample>(ArtefactPrompt.entries.size * 8)
 
   fun reset() {
     startedAtMs = nowMs()
     samples.clear()
     selectedCalibrationSamples = emptyList()
     adaptiveSamples.clear()
+    artefactSamples.clear()
   }
 
   fun addSample(features: EegFeatures, quality: QualityMetrics) {
@@ -106,6 +113,37 @@ class CalibrationManager(
   }
 
   fun adaptiveSampleCount(): Int = adaptiveSamples.size
+
+  fun resetArtefactCapture() {
+    artefactSamples.clear()
+  }
+
+  fun addArtefactSample(prompt: ArtefactPrompt, features: EegFeatures) {
+    artefactSamples += ArtefactCalibrationSample(prompt = prompt, features = features)
+  }
+
+  fun buildArtefactCalibrationProfile(): ArtefactCalibrationProfile {
+    val eyeMotionBlinkPeak = artefactSamples
+      .filter { it.prompt == ArtefactPrompt.LOOK_LEFT_RIGHT || it.prompt == ArtefactPrompt.LOOK_UP_DOWN }
+      .maxOfOrNull { it.features.blinkRateHz }
+      ?: 0f
+    val jawPeak = artefactSamples
+      .filter { it.prompt == ArtefactPrompt.JAW_CLENCH }
+      .maxOfOrNull { it.features.hfRatio }
+      ?: 0f
+    val frownPeak = artefactSamples
+      .filter { it.prompt == ArtefactPrompt.FROWN }
+      .maxOfOrNull { it.features.hfRatio }
+      ?: 0f
+
+    return ArtefactCalibrationProfile(
+      blinkNormalizationHz = maxOf(1.0f, eyeMotionBlinkPeak * 0.6f),
+      emgNormalizationHfRatio = maxOf(0.35f, maxOf(jawPeak, frownPeak) * 0.6f),
+      eyeMotionBlinkPeakHz = eyeMotionBlinkPeak,
+      jawClenchHfPeakRatio = jawPeak,
+      frownHfPeakRatio = frownPeak,
+    )
+  }
 
   private fun pushAdaptive(sample: CalibrationFeatureSample) {
     if (adaptiveSamples.size >= adaptiveCapacity) {

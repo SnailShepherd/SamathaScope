@@ -50,6 +50,37 @@ class CalibrationManagerTest {
     assertThat(manager.adaptiveSampleCount()).isAtMost(600)
   }
 
+  @Test
+  fun artefactCalibrationProfile_usesSeparateArtefactSamples() {
+    val manager = CalibrationManager()
+
+    manager.reset()
+    manager.addArtefactSample(
+      prompt = ArtefactPrompt.LOOK_LEFT_RIGHT,
+      features = feature(index = 1, logBeta = 0.3f, blinkRateHz = 2.2f)
+    )
+    manager.addArtefactSample(
+      prompt = ArtefactPrompt.LOOK_UP_DOWN,
+      features = feature(index = 2, logBeta = 0.3f, blinkRateHz = 1.6f)
+    )
+    manager.addArtefactSample(
+      prompt = ArtefactPrompt.JAW_CLENCH,
+      features = feature(index = 3, logBeta = 0.3f, hfRatio = 0.82f)
+    )
+    manager.addArtefactSample(
+      prompt = ArtefactPrompt.FROWN,
+      features = feature(index = 4, logBeta = 0.3f, hfRatio = 0.68f)
+    )
+
+    val profile = manager.buildArtefactCalibrationProfile()
+
+    assertThat(profile.eyeMotionBlinkPeakHz).isWithin(1e-6f).of(2.2f)
+    assertThat(profile.blinkNormalizationHz).isWithin(1e-6f).of(1.32f)
+    assertThat(profile.jawClenchHfPeakRatio).isWithin(1e-6f).of(0.82f)
+    assertThat(profile.frownHfPeakRatio).isWithin(1e-6f).of(0.68f)
+    assertThat(profile.emgNormalizationHfRatio).isWithin(1e-6f).of(0.492f)
+  }
+
   private fun feature(
     index: Int,
     logBeta: Float,
