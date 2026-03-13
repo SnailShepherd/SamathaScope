@@ -81,6 +81,8 @@ data class UiState(
   val selectedMetricInfo: PlotType = PlotType.MEDITATION_PROXY,
   val metricPlotSeries: Map<PlotType, List<Float>> = emptyMap(),
   val plotSettings: Map<PlotType, PlotSettings> = defaultPlotSettings(),
+  val rawPlotOffsetSeconds: Int = 0,
+  val metricPlotOffsetSeconds: Int = 0,
 
   val sessionRunning: Boolean = false,
   val sessionPaused: Boolean = false,
@@ -122,11 +124,9 @@ data class UiState(
 
   val audioEnabled: Boolean = true,
   val invertReward: Boolean = false,
-  val crackleEnabled: Boolean = true,
   val gamma: Float = 1.6f,
   val gMinDb: Int = -30,
   val gMaxDb: Int = -3,
-  val crackleIntensity: Float = 0.6f,
   val notch50Enabled: Boolean = false,
 
   val audioRunning: Boolean = false,
@@ -146,8 +146,8 @@ data class UiState(
 
 fun defaultVisibleMetrics(): Set<PlotType> = linkedSetOf(
   PlotType.MEDITATION_PROXY,
+  PlotType.SETTLEDNESS,
   PlotType.ALERTNESS,
-  PlotType.DROWSY_SCORE,
   PlotType.ARTEFACT_SCORE,
 )
 

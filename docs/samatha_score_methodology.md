@@ -1,6 +1,6 @@
 # Frontal-State Feedback Methodology
 
-This document describes the current `v0.5` EEG analysis and feedback pipeline used by SamathaScope. It replaces the retired RAI/Samatha-score pipeline.
+This document describes the current `v0.6` EEG analysis and feedback pipeline used by SamathaScope. It replaces the retired RAI/Samatha-score pipeline.
 
 ## System intent
 
@@ -12,6 +12,7 @@ Design goals:
 - separate drowsiness from settled practice
 - suppress reward during contaminated signal
 - keep formulas transparent and deterministic
+- let the dashboard and games use the same classifier without forcing the same control mapping
 
 ## Abbreviations
 
@@ -20,19 +21,25 @@ Design goals:
 - `TBR`: theta/beta ratio
 - `TAR`: theta/alpha ratio
 - `ABR`: alpha/beta ratio
-- `EMG`: high-frequency muscle contamination proxy, not a literal medical EMG channel
+- `EMG`: high-frequency muscle contamination proxy
 - `HF`: high-frequency power band used here for artefact diagnostics (`20-40 Hz`)
 
 ## Dashboard and feedback model
 
-The app now uses a dashboard-first workflow:
+The app uses a dashboard-first workflow:
 
-- `Dashboard`: connection, session control, raw EEG, metric explorer, diagnostics
+- `Dashboard`: connection, session control, source dropdown, raw EEG, metric explorer, diagnostics
 - `Settings`: audio, recording, notch, and plot-window controls
-- `Game`: shared-source lantern scene
+- `Game`: four neurofeedback scenes with their own fixed EEG mappings
 - `Learn`: glossary, formulas, caveats
 
-One shared `feedbackMetric` now drives both audio and game. The default remains `MeditationProxy`.
+Dashboard audio source selection now lives in the `Session` card and is limited to:
+
+- `Meditation Proxy`
+- `Settledness`
+- `Alertness`
+
+The metric explorer no longer changes the source. Tap toggles visibility. Long-press focuses the explainer.
 
 ## Pipeline summary
 
@@ -47,7 +54,7 @@ One shared `feedbackMetric` now drives both audio and game. The default remains 
 9. Run a two-stage model:
    - quality gate
    - drowsiness-first state classification
-10. Smooth outputs and drive audio/game feedback from the shared source.
+10. Smooth outputs and drive dashboard audio, plots, and game mappings.
 
 ## Extracted features
 
@@ -156,8 +163,6 @@ Hard contamination rules:
 
 If any of those trip, the discrete state becomes `SIGNAL_CONTAMINATED` and the reward path is suppressed.
 
-Note: 50 Hz line noise is still exposed in diagnostics and recording, but it is not included in the total artefact score.
-
 ## Stage 2: drowsiness-first classification
 
 Heuristic scores:
@@ -192,7 +197,27 @@ Settledness = sigmoid(z(ABR) - 0.5*z(TAR))
 MeditationProxy = Settledness * Alertness * QualityConfidence
 ```
 
-The default feedback signal for audio and game is `MeditationProxy`.
+## Game signal mapping
+
+The games do not use the dashboard source dropdown. They consume a fixed mapping:
+
+```text
+stability = Settledness * QualityConfidence
+drift = MindWandering * QualityConfidence
+noise = ArtefactScore
+fatigue = slow_gate(DisplayedDrowsyScore)
+precision = Control * QualityConfidence
+correctionPulse = transient(EffortfulFocus rise)
+```
+
+Interpretation:
+
+- `stability`: coherence, damping, completion
+- `drift`: wandering, sway, tangling, broken continuity
+- `noise`: visible glitch, tremor, splatter
+- `fatigue`: slow dimming or stalling only
+- `precision`: used only for `Sky Tower`
+- `correctionPulse`: short rescue window, not a sustained reward lane
 
 ## Smoothing and display logic
 
@@ -213,6 +238,7 @@ Displayed drowsiness:
 
 - uses a slower smoother with `alpha = 0.15`
 - is capped at `0.45` during clean, strongly settled, non-suppressed-entropy windows to reduce false sleepy-looking spikes
+- is additionally re-used by the games only through a slower fatigue gate
 
 Displayed state logic:
 
@@ -221,18 +247,24 @@ Displayed state logic:
   - 5 consecutive clean updates above threshold
   - or 1 clean update above `0.80`
 
-## Plots and recording
+## Plots, audio, and recording
 
 Dashboard plot model:
 
-- raw EEG strip is always visible and fixed at `5s`
+- raw EEG strip stays visible
 - normalized metric explorer uses `0..100`
-- up to 4 simultaneous lines
-- default visible metrics:
-  - `MeditationProxy`
-  - `Alertness`
-  - `DrowsyScore`
-  - `ArtefactScore`
+- every remaining explorer metric can be shown at once
+- per-metric colors are stable across chips, lines, legend, and explainer
+- paused or stopped plots can be dragged to older history
+- raw plotting keeps a separate decimated history buffer for older browsing
+
+Audio model:
+
+- dashboard noise audio and game audio both exist for the session
+- tab switches crossfade by muting/unmuting persistent engines instead of recreating them
+- pause silences both without tearing them down
+- stop, disconnect, audio-off, and `onCleared` hard-stop both engines so no audio leaks remain
+- artefact crackle overlay has been removed
 
 `features.csv` includes:
 
@@ -244,14 +276,9 @@ Dashboard plot model:
 - drowsiness contribution terms
 - raw and smoothed state probabilities
 - raw and displayed state labels
-- final shared feedback metric names and values sent to audio/game
-
-## Behavioral implications
-
-- Drowsiness is not rewarded.
-- Contaminated windows are not rewarded.
-- Quiet sleep should not look like good meditation feedback.
-- The app encourages relaxed alertness, not stillness at any cost.
+- selected dashboard feedback metric names and values
+- selected game id
+- mapped game signal channels and a compact game runtime summary
 
 ## Limitations
 

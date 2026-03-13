@@ -5,6 +5,7 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.sign
 import kotlin.math.sin
 
 enum class GameId {
@@ -30,17 +31,17 @@ fun GameId.displayName(): String {
 
 fun GameId.description(): String {
   return when (this) {
-    GameId.SKY_TOWER -> "Falling blocks, timed taps, and EEG-driven stability."
-    GameId.INK_GARDEN -> "A passive ink ecosystem with droplets, trails, and splatters."
-    GameId.FIRE_KEEPER -> "Passive campfire behaviour shaped by steadiness, drift, and fatigue."
-    GameId.SCRIPTORIUM -> "A self-writing manuscript that sharpens or degrades with your state."
+    GameId.SKY_TOWER -> "Release one carrier block at a time and let calm settling build a stable tower."
+    GameId.INK_GARDEN -> "Pigment blooms across wet paper; your EEG shapes pooling, bleed, and splatter."
+    GameId.FIRE_KEEPER -> "A passive campfire scene shaped by steadiness, drift, correction, and fatigue."
+    GameId.SCRIPTORIUM -> "A passive manuscript that writes itself more clearly when the state is stable."
   }
 }
 
 fun GameId.inputHint(): String {
   return when (this) {
-    GameId.SKY_TOWER -> "Tap to fire a short placement assist while the block is falling."
-    else -> "Passive scene: breathe, settle, and let the scene respond."
+    GameId.SKY_TOWER -> "Tap once to release the carrier block. Wait for it to settle before the next one."
+    else -> "Passive scene: settle, stay awake, and let the scene respond."
   }
 }
 
@@ -51,22 +52,22 @@ fun GameId.guide(): GameGuide {
     GameId.SKY_TOWER -> GameGuide(
       title = "Sky Tower guide",
       lines = listOf(
-        "Tap Start, then tap to fire a brief placement assist while each block falls.",
-        "Settledness damps sway and helps the stack absorb rough landings.",
-        "Mind Wandering increases drift, wind, and misalignment pressure.",
-        "Artefact Score becomes tremors and impact shake.",
-        "Effortful Focus gives a short rescue correction when placement gets messy.",
+        "One tap releases one carrier block. There is no constant tapping loop anymore.",
+        "Settledness improves damping, steadier landings, and post-impact recovery.",
+        "Mind Wandering adds drift, uneven sweep, and sideways pressure before and after release.",
+        "Artefact Score becomes short physical jolts and tremors in the stack.",
+        "Effortful Focus adds a brief rescue window that nudges a shaky release back toward coherence.",
       ),
     )
 
     GameId.INK_GARDEN -> GameGuide(
       title = "Ink Garden guide",
       lines = listOf(
-        "This one is passive after Start: droplets seep, split, and leave ink trails on their own.",
-        "Settledness makes the flow cohesive, smooth, and branch into cleaner forms.",
-        "Mind Wandering makes tendrils wander sideways and fork more chaotically.",
-        "Artefact Score throws splatters, jagged breaks, and noisy ink bursts.",
-        "Effortful Focus briefly pulls the flow back together into luminous repair blooms.",
+        "This scene is passive after Start: pigment seeds land on wet paper and spread on their own.",
+        "Settledness produces cleaner pooling, smoother bleed, and darker coherent forms.",
+        "Mind Wandering sends pigment sideways into wandering channels and tangled bleed paths.",
+        "Artefact Score adds splatter, granulation, and ragged feathering.",
+        "Effortful Focus creates brief re-cohesion blooms that gather wandering pigment back together.",
       ),
     )
 
@@ -75,9 +76,9 @@ fun GameId.guide(): GameGuide {
       lines = listOf(
         "This scene stays passive once started.",
         "Settledness makes the flame upright, cohesive, and warm.",
-        "Mind Wandering makes the flame lean, flicker, and wander.",
-        "Artefact Score drives sparks, gusts, and smoke bursts.",
-        "Effortful Focus gives brief rekindling lifts through the ember bed.",
+        "Mind Wandering makes the flame lean, wander, and split unevenly.",
+        "Artefact Score drives sparks, smoke bursts, and gusty jitter.",
+        "Effortful Focus briefly rekindles the fire with a clean ember lift.",
       ),
     )
 
@@ -143,46 +144,51 @@ sealed interface GameRuntimeState {
   val timeSeconds: Float
 }
 
-data class TowerBlock(
+data class TowerCarrier(
+  val x: Float = 0.20f,
+  val y: Float = TOWER_CARRIER_Y,
+  val width: Float = TOWER_BLOCK_WIDTH,
+  val direction: Float = 1f,
+  val speed: Float = 0.21f,
+  val visible: Boolean = true,
+)
+
+data class TowerBody(
+  val id: Int,
   val x: Float,
+  val y: Float,
   val width: Float,
+  val height: Float = TOWER_BLOCK_HEIGHT,
+  val angle: Float = 0f,
+  val vx: Float = 0f,
+  val vy: Float = 0f,
+  val angularVelocity: Float = 0f,
+  val sleeping: Boolean = false,
+  val restSeconds: Float = 0f,
+  val grounded: Boolean = false,
+  val supportId: Int? = null,
 )
 
 data class SkyTowerRuntimeState(
   override val timeSeconds: Float = 0f,
-  val blocks: List<TowerBlock> = listOf(TowerBlock(x = 0.50f, width = 0.22f)),
-  val activeX: Float = 0.22f,
-  val activeY: Float = -0.12f,
-  val activeVX: Float = 0.11f,
-  val activeVY: Float = 0.12f,
-  val activeWidth: Float = 0.18f,
-  val assistSeconds: Float = 0f,
-  val towerSway: Float = 0f,
+  val carrier: TowerCarrier = TowerCarrier(),
+  val bodies: List<TowerBody> = listOf(towerFoundation()),
+  val activeBodyId: Int? = null,
+  val spawnDelaySeconds: Float = 0f,
+  val swaySeverity: Float = 0f,
   val tremor: Float = 0f,
   val placements: Int = 0,
   val misses: Int = 0,
   val lastError: Float = 0f,
-  val spawnIndex: Int = 0,
+  val nextBodyId: Int = 1,
 ) : GameRuntimeState
 
-data class InkDroplet(
-  val id: Int,
-  val x: Float,
-  val y: Float,
-  val vx: Float,
-  val vy: Float,
-  val ink: Float,
-  val age: Float,
-  val branchBias: Float,
-)
-
-data class InkSegment(
-  val startX: Float,
-  val startY: Float,
-  val endX: Float,
-  val endY: Float,
-  val width: Float,
-  val alpha: Float,
+data class InkCell(
+  val column: Int,
+  val row: Int,
+  val pigment: Float,
+  val wetness: Float,
+  val edge: Float,
 )
 
 data class InkBlotch(
@@ -194,27 +200,13 @@ data class InkBlotch(
 
 data class InkGardenRuntimeState(
   override val timeSeconds: Float = 0f,
-  val droplets: List<InkDroplet> = listOf(
-    InkDroplet(
-      id = 0,
-      x = 0.50f,
-      y = 0.80f,
-      vx = 0f,
-      vy = -0.05f,
-      ink = 0.95f,
-      age = 0f,
-      branchBias = 0f,
-    )
-  ),
-  val segments: List<InkSegment> = emptyList(),
-  val blotches: List<InkBlotch> = listOf(
-    InkBlotch(x = 0.50f, y = 0.82f, radius = 0.020f, alpha = 0.18f)
-  ),
+  val cells: List<InkCell> = initialInkCells(),
+  val splatters: List<InkBlotch> = emptyList(),
+  val completion: Float = 0f,
+  val bloom: Float = 0f,
+  val granulation: Float = 0f,
   val spawnTimer: Float = 0f,
-  val completion: Float = 0.06f,
-  val splatter: Float = 0f,
-  val repairGlow: Float = 0f,
-  val nextDropletId: Int = 1,
+  val nextSeedIndex: Int = 0,
 ) : GameRuntimeState
 
 data class FireKeeperRuntimeState(
@@ -288,13 +280,7 @@ fun <TState : GameRuntimeState> GameController<TState>.erase(): AnyGameControlle
 class SkyTowerController : GameController<SkyTowerRuntimeState> {
   override val id: GameId = GameId.SKY_TOWER
 
-  override fun initialState(): SkyTowerRuntimeState {
-    return spawnedTowerState(
-      state = SkyTowerRuntimeState(),
-      width = 0.18f,
-      spawnIndex = 0,
-    )
-  }
+  override fun initialState(): SkyTowerRuntimeState = SkyTowerRuntimeState()
 
   override fun step(
     state: SkyTowerRuntimeState,
@@ -302,135 +288,20 @@ class SkyTowerController : GameController<SkyTowerRuntimeState> {
     signals: GameSignalSnapshot,
     events: List<GameEvent>,
   ): SkyTowerRuntimeState {
-    val nextTime = state.timeSeconds + dtSeconds
-    val tapped = events.any { it is GameEvent.Tap }
-    val supportBlock = state.blocks.last()
-    val supportCenter = supportBlock.x + (state.towerSway * 0.08f)
-    val assistSeconds = when {
-      tapped -> max(state.assistSeconds, 0.45f + (signals.precision * 0.35f))
-      else -> (state.assistSeconds - dtSeconds).coerceAtLeast(0f)
-    }
-    val assistStrength = clamp01((assistSeconds / 0.75f) + (signals.correctionPulse * 0.70f))
-    var towerSway = damp(
-      current = state.towerSway,
-      amountPerSecond = 2.4f + (signals.stability * 3.0f) + (assistStrength * 1.2f),
-      dtSeconds = dtSeconds,
-    )
-    towerSway += sin(nextTime * 3.6f) * (0.002f + (signals.drift * 0.007f) + (state.tremor * 0.003f))
-    var tremor = damp(
-      current = state.tremor,
-      amountPerSecond = 3.0f + (signals.stability * 3.5f),
-      dtSeconds = dtSeconds,
-    )
-    tremor = clamp01(tremor + (signals.noise * 0.020f))
-
-    val driftWave = sin((nextTime * 1.5f) + (state.spawnIndex * 0.8f)) * (0.12f + (signals.drift * 0.18f))
-    val guidance = (0.8f + (signals.precision * 1.1f) + (signals.stability * 0.6f) + (assistStrength * 1.8f))
-    var activeVX = state.activeVX + ((driftWave - state.activeVX) * dtSeconds * 1.8f)
-    var activeVY = state.activeVY + ((0.64f + (signals.drift * 0.18f) + ((1f - signals.stability) * 0.14f)) * dtSeconds)
-    var activeX = state.activeX
-    var activeY = state.activeY
-
-    if (assistStrength > 0.01f) {
-      activeVX += (supportCenter - activeX) * guidance * dtSeconds
-      activeVY *= (1f - (0.30f * assistStrength).coerceIn(0f, 0.22f))
+    var next = if (events.any { it is GameEvent.Tap } && canReleaseCarrier(state)) {
+      releaseCarrier(state, signals)
+    } else {
+      state
     }
 
-    activeX += activeVX * dtSeconds
-    activeY += activeVY * dtSeconds
-
-    if (activeX <= 0.10f) {
-      activeX = 0.10f
-      activeVX = abs(activeVX) * 0.65f
-    } else if (activeX >= 0.90f) {
-      activeX = 0.90f
-      activeVX = -abs(activeVX) * 0.65f
+    var remaining = dtSeconds.coerceIn(1f / 120f, 0.12f)
+    while (remaining > 0f) {
+      val substep = min(remaining, 1f / 60f)
+      next = stepTowerPhysics(next, substep, signals)
+      remaining -= substep
     }
 
-    val targetY = towerLandingCenterY(state.blocks.size)
-    val placementWindow = 0.010f + (signals.precision * 0.030f) + (assistStrength * 0.030f)
-    val perfectWindow = 0.010f + (signals.precision * 0.020f)
-    val withinCatchBand = activeY in targetY..(targetY + (TOWER_BLOCK_HEIGHT * 0.90f))
-    val eligibleToPlace = withinCatchBand && (assistStrength > 0.10f || abs(activeX - supportCenter) <= perfectWindow)
-
-    if (eligibleToPlace) {
-      val snappedX = approach(
-        current = activeX,
-        target = supportCenter,
-        factor = (0.20f + (assistStrength * 0.50f) + (signals.precision * 0.18f)).coerceIn(0f, 0.90f),
-      )
-      val supportLeft = supportCenter - (supportBlock.width / 2f)
-      val supportRight = supportCenter + (supportBlock.width / 2f)
-      var activeLeft = snappedX - (state.activeWidth / 2f)
-      var activeRight = snappedX + (state.activeWidth / 2f)
-      val gap = max(supportLeft - activeRight, activeLeft - supportRight).coerceAtLeast(0f)
-
-      if (gap <= placementWindow) {
-        val snapFactor = (1f - (gap / placementWindow.coerceAtLeast(0.0001f))).coerceIn(0f, 1f)
-        val rescuedX = approach(snappedX, supportCenter, 0.30f + (snapFactor * 0.45f))
-        activeLeft = rescuedX - (state.activeWidth / 2f)
-        activeRight = rescuedX + (state.activeWidth / 2f)
-      }
-
-      val overlapLeft = max(activeLeft, supportLeft)
-      val overlapRight = min(activeRight, supportRight)
-      val overlapWidth = overlapRight - overlapLeft
-      if (overlapWidth >= 0.045f) {
-        val placedX = (overlapLeft + overlapRight) / 2f
-        val error = abs(placedX - supportCenter)
-        val placedBlock = TowerBlock(
-          x = placedX.coerceIn(0.10f, 0.90f),
-          width = overlapWidth.coerceIn(0.07f, state.activeWidth),
-        )
-        val nextBlocks = state.blocks + placedBlock
-        val nextTremor = clamp01(
-          max(tremor, (signals.noise * 0.45f) + (error * 2.8f) + (abs(state.activeVX) * 0.25f))
-        )
-        val nextSway = towerSway + ((placedX - supportCenter) * (0.80f - (signals.stability * 0.32f)))
-        return spawnedTowerState(
-          state = state.copy(
-            timeSeconds = nextTime,
-            blocks = nextBlocks,
-            assistSeconds = 0f,
-            towerSway = nextSway.coerceIn(-0.22f, 0.22f),
-            tremor = nextTremor,
-            placements = state.placements + 1,
-            lastError = error,
-            spawnIndex = state.spawnIndex + 1,
-          ),
-          width = placedBlock.width,
-          spawnIndex = state.spawnIndex + 1,
-        )
-      }
-    }
-
-    if (activeY >= TOWER_GROUND_Y + TOWER_BLOCK_HEIGHT) {
-      val nextTremor = clamp01(max(tremor, 0.22f + (signals.noise * 0.40f)))
-      return spawnedTowerState(
-        state = state.copy(
-          timeSeconds = nextTime,
-          assistSeconds = 0f,
-          towerSway = (towerSway + (activeVX * 0.03f)).coerceIn(-0.22f, 0.22f),
-          tremor = nextTremor,
-          misses = state.misses + 1,
-          lastError = 0.18f,
-          spawnIndex = state.spawnIndex + 1,
-        ),
-        width = supportBlock.width.coerceIn(0.08f, 0.18f),
-        spawnIndex = state.spawnIndex + 1,
-      )
-    }
-
-    return state.copy(
-      timeSeconds = nextTime,
-      activeX = activeX,
-      activeY = activeY,
-      activeVX = activeVX,
-      activeVY = activeVY,
-      assistSeconds = assistSeconds,
-      towerSway = towerSway.coerceIn(-0.22f, 0.22f),
-      tremor = tremor,
-    )
+    return finalizeTower(next, signals)
   }
 
   override fun hud(state: SkyTowerRuntimeState, signals: GameSignalSnapshot): GameHudState {
@@ -452,14 +323,287 @@ class SkyTowerController : GameController<SkyTowerRuntimeState> {
   }
 
   override fun audio(state: SkyTowerRuntimeState, signals: GameSignalSnapshot): GameAudioState {
+    val activeMotion = state.bodies.firstOrNull { it.id == state.activeBodyId }
     return GameAudioState(
-      ambience = clamp01(0.18f + (state.placements * 0.04f) + (signals.stability * 0.24f)),
-      motion = clamp01((signals.drift * 0.55f) + abs(state.activeVX) + (state.lastError * 2.2f)),
-      glitch = clamp01(signals.noise + (state.tremor * 0.55f)),
-      accent = clamp01(signals.correctionPulse + (state.assistSeconds * 0.70f)),
-      warmth = clamp01(0.24f + (signals.stability * 0.34f) - (signals.fatigue * 0.12f)),
+      ambience = clamp01(0.18f + (state.placements * 0.05f) + (signals.stability * 0.18f)),
+      motion = clamp01((signals.drift * 0.45f) + abs(activeMotion?.vx ?: 0f) + state.swaySeverity),
+      glitch = clamp01((signals.noise * 0.70f) + (state.tremor * 0.45f)),
+      accent = clamp01(signals.correctionPulse + (signals.precision * 0.18f)),
+      warmth = clamp01(0.22f + (signals.stability * 0.32f) - (signals.fatigue * 0.10f)),
       muted = false,
     )
+  }
+
+  private fun canReleaseCarrier(state: SkyTowerRuntimeState): Boolean {
+    return state.activeBodyId == null && state.spawnDelaySeconds <= 0f && state.carrier.visible
+  }
+
+  private fun releaseCarrier(
+    state: SkyTowerRuntimeState,
+    signals: GameSignalSnapshot,
+  ): SkyTowerRuntimeState {
+    val released = TowerBody(
+      id = state.nextBodyId,
+      x = state.carrier.x,
+      y = state.carrier.y,
+      width = state.carrier.width,
+      vx = state.carrier.direction * state.carrier.speed * 0.18f,
+      vy = 0f,
+      angle = 0f,
+      angularVelocity = (signals.drift - signals.stability) * 0.10f,
+      sleeping = false,
+    )
+    return state.copy(
+      bodies = state.bodies + released,
+      activeBodyId = released.id,
+      carrier = state.carrier.copy(visible = false),
+      nextBodyId = state.nextBodyId + 1,
+    )
+  }
+
+  private fun stepTowerPhysics(
+    state: SkyTowerRuntimeState,
+    dtSeconds: Float,
+    signals: GameSignalSnapshot,
+  ): SkyTowerRuntimeState {
+    var carrier = state.carrier
+    var spawnDelay = (state.spawnDelaySeconds - dtSeconds).coerceAtLeast(0f)
+    val nextTime = state.timeSeconds + dtSeconds
+
+    if (state.activeBodyId == null && spawnDelay <= 0f) {
+      val driftWave = sin(((nextTime * (1.1f + (signals.drift * 1.8f))) + 0.6f).toDouble()).toFloat() *
+        (0.02f + (signals.drift * 0.06f))
+      val speed = 0.16f + (signals.drift * 0.10f) + ((1f - signals.stability) * 0.04f)
+      var nextX = carrier.x + ((carrier.direction * speed) + driftWave) * dtSeconds
+      var nextDirection = carrier.direction
+      if (nextX <= 0.18f) {
+        nextX = 0.18f
+        nextDirection = 1f
+      } else if (nextX >= 0.82f) {
+        nextX = 0.82f
+        nextDirection = -1f
+      }
+      carrier = carrier.copy(
+        x = nextX,
+        direction = nextDirection,
+        speed = speed,
+        visible = true,
+      )
+    }
+
+    var tremor = damp(
+      current = state.tremor,
+      amountPerSecond = 2.2f + (signals.stability * 2.6f),
+      dtSeconds = dtSeconds,
+    )
+    tremor = clamp01(tremor + (signals.noise * 0.018f))
+
+    val updatedBodies = state.bodies.toMutableList()
+    for (index in 1 until updatedBodies.size) {
+      val body = updatedBodies[index]
+      updatedBodies[index] = updateTowerBody(
+        index = index,
+        body = body,
+        allBodies = updatedBodies,
+        activeBodyId = state.activeBodyId,
+        dtSeconds = dtSeconds,
+        signals = signals,
+        timeSeconds = nextTime,
+      )
+    }
+
+    var nextBodies = updatedBodies.toList()
+    var nextActiveBodyId = state.activeBodyId
+    var nextPlacements = state.placements
+    var nextMisses = state.misses
+    var nextLastError = state.lastError
+
+    val activeBody = nextBodies.firstOrNull { it.id == state.activeBodyId }
+    if (activeBody != null) {
+      when {
+        activeBody.supportId != null && activeBody.sleeping -> {
+          nextPlacements += 1
+          nextActiveBodyId = null
+          spawnDelay = 0.32f
+          carrier = carrier.copy(
+            visible = false,
+            x = if (carrier.direction >= 0f) 0.22f else 0.78f,
+            width = TOWER_BLOCK_WIDTH,
+          )
+          val support = nextBodies.firstOrNull { it.id == activeBody.supportId }
+          nextLastError = support?.let { abs(activeBody.x - it.x) } ?: 0f
+        }
+
+        activeBody.grounded && activeBody.sleeping -> {
+          nextBodies = nextBodies.filterNot { it.id == activeBody.id }
+          nextActiveBodyId = null
+          nextMisses += 1
+          spawnDelay = 0.28f
+          carrier = carrier.copy(
+            visible = false,
+            x = if (carrier.direction >= 0f) 0.22f else 0.78f,
+            width = TOWER_BLOCK_WIDTH,
+          )
+          nextLastError = 0.18f
+          tremor = clamp01(max(tremor, 0.18f + (signals.noise * 0.30f)))
+        }
+
+        activeBody.y > 1.08f || activeBody.x < -0.18f || activeBody.x > 1.18f -> {
+          nextBodies = nextBodies.filterNot { it.id == activeBody.id }
+          nextActiveBodyId = null
+          nextMisses += 1
+          spawnDelay = 0.28f
+          carrier = carrier.copy(visible = false, width = TOWER_BLOCK_WIDTH)
+          nextLastError = 0.18f
+        }
+      }
+    }
+
+    if (nextActiveBodyId == null && spawnDelay <= 0f) {
+      carrier = carrier.copy(visible = true)
+    }
+
+    return state.copy(
+      timeSeconds = nextTime,
+      carrier = carrier,
+      bodies = nextBodies,
+      activeBodyId = nextActiveBodyId,
+      spawnDelaySeconds = spawnDelay,
+      swaySeverity = towerSwaySeverity(nextBodies),
+      tremor = tremor,
+      placements = nextPlacements,
+      misses = nextMisses,
+      lastError = nextLastError,
+    )
+  }
+
+  private fun updateTowerBody(
+    index: Int,
+    body: TowerBody,
+    allBodies: List<TowerBody>,
+    activeBodyId: Int?,
+    dtSeconds: Float,
+    signals: GameSignalSnapshot,
+    timeSeconds: Float,
+  ): TowerBody {
+    if (body.id != activeBodyId && body.sleeping && signals.noise < 0.72f) {
+      return body
+    }
+
+    var vx = body.vx
+    var vy = body.vy
+    var angle = body.angle
+    var angularVelocity = body.angularVelocity
+    var grounded = false
+    var supportId: Int? = null
+    var restSeconds = body.restSeconds
+    var sleeping = body.sleeping
+
+    if (body.sleeping && signals.noise >= 0.72f && index >= allBodies.lastIndex - 1) {
+      val wakePulse = sin(((timeSeconds * 11f) + body.id).toDouble()).toFloat()
+      if (wakePulse > 0.92f) {
+        vx += (wakePulse - 0.90f) * 0.18f * sign(wakePulse)
+        angularVelocity += wakePulse * 0.22f
+        sleeping = false
+        restSeconds = 0f
+      }
+    }
+
+    if (!sleeping) {
+      val gravity = 1.20f + ((1f - signals.stability) * 0.18f)
+      val wind = sin(((timeSeconds * (1.0f + (signals.drift * 1.6f))) + (body.id * 0.9f)).toDouble()).toFloat() *
+        (0.05f + (signals.drift * 0.10f) + (signals.noise * 0.04f))
+      vx += wind * dtSeconds
+      vy += gravity * dtSeconds
+      angularVelocity += wind * 0.9f * dtSeconds
+
+      if (body.id == activeBodyId) {
+        val support = bodiesBelow(body, allBodies).minByOrNull { it.y }
+        if (support != null) {
+          val guidance = 0.4f + (signals.precision * 1.0f) + (signals.correctionPulse * 1.3f)
+          vx += (support.x - body.x) * guidance * dtSeconds
+          angularVelocity += (support.x - body.x) * 0.6f * dtSeconds
+        }
+      }
+
+      val linearDamping = (1f - ((0.45f + (signals.stability * 1.9f)) * dtSeconds)).coerceIn(0.75f, 0.99f)
+      val angularDamping = (1f - ((0.70f + (signals.stability * 2.5f)) * dtSeconds)).coerceIn(0.72f, 0.995f)
+      vx *= linearDamping
+      angularVelocity *= angularDamping
+      angle = (angle + (angularVelocity * dtSeconds)).coerceIn(-0.28f, 0.28f)
+    }
+
+    var x = body.x + (vx * dtSeconds)
+    var y = body.y + (vy * dtSeconds)
+    val contact = findSupportContact(
+      body = body.copy(x = x, y = y, angle = angle),
+      index = index,
+      allBodies = allBodies,
+    )
+
+    if (contact != null) {
+      y = contact.topY - (body.height / 2f)
+      supportId = contact.supportId
+      grounded = contact.grounded
+      val offset = x - contact.supportCenter
+      vx += offset * (0.8f + (signals.drift * 0.8f) - (signals.stability * 0.35f)) * dtSeconds
+      angularVelocity += offset * (2.0f - (signals.stability * 0.9f))
+      vy = if (vy > 0f) -vy * 0.04f else 0f
+      vx *= 0.86f + (signals.stability * 0.08f)
+
+      if (contact.supportRatio < TOWER_MIN_SUPPORT_RATIO) {
+        vx += sign(offset.takeIf { it != 0f } ?: 1f) * 0.08f
+        angularVelocity += sign(offset.takeIf { it != 0f } ?: 1f) * 0.05f
+        restSeconds = 0f
+        sleeping = false
+      } else {
+        val stable = abs(vx) < 0.02f && abs(vy) < 0.03f && abs(angularVelocity) < 0.10f && abs(offset) < 0.045f
+        restSeconds = if (stable) restSeconds + dtSeconds else 0f
+        sleeping = restSeconds >= 0.26f
+      }
+    } else {
+      grounded = false
+      supportId = null
+      restSeconds = 0f
+      sleeping = false
+    }
+
+    return body.copy(
+      x = x.coerceIn(-0.24f, 1.24f),
+      y = y,
+      angle = angle,
+      vx = vx,
+      vy = vy,
+      angularVelocity = angularVelocity,
+      sleeping = sleeping,
+      restSeconds = restSeconds,
+      grounded = grounded,
+      supportId = supportId,
+    )
+  }
+
+  private fun finalizeTower(
+    state: SkyTowerRuntimeState,
+    signals: GameSignalSnapshot,
+  ): SkyTowerRuntimeState {
+    val wakeFactor = max(0f, (signals.noise - 0.62f) * 0.35f)
+    if (wakeFactor <= 0f) return state
+    val bodies = state.bodies.toMutableList()
+    for (index in max(1, bodies.lastIndex - 2)..bodies.lastIndex) {
+      if (index !in bodies.indices) continue
+      val body = bodies[index]
+      if (!body.sleeping) continue
+      val pulse = sin(((state.timeSeconds * 8f) + body.id).toDouble()).toFloat()
+      if (pulse > 0.96f) {
+        bodies[index] = body.copy(
+          sleeping = false,
+          restSeconds = 0f,
+          vx = body.vx + ((pulse - 0.95f) * wakeFactor),
+          angularVelocity = body.angularVelocity + (pulse * wakeFactor),
+        )
+      }
+    }
+    return state.copy(bodies = bodies)
   }
 }
 
@@ -475,142 +619,162 @@ class InkGardenController : GameController<InkGardenRuntimeState> {
     events: List<GameEvent>,
   ): InkGardenRuntimeState {
     if (events.isNotEmpty()) {
-      // Ink Garden stays passive in v1.
+      // Ink Garden stays passive.
     }
     val nextTime = state.timeSeconds + dtSeconds
-    val growthRate = (0.45f + (signals.stability * 0.35f) + (signals.correctionPulse * 0.20f) - (signals.fatigue * 0.22f)).coerceAtLeast(0.12f)
-    var spawnTimer = state.spawnTimer + (dtSeconds * growthRate)
-    var nextDropletId = state.nextDropletId
-    val droplets = state.droplets.toMutableList()
-    val segments = state.segments.toMutableList()
-    val blotches = state.blotches.toMutableList()
+    var spawnTimer = state.spawnTimer + dtSeconds
+    var nextSeedIndex = state.nextSeedIndex
 
-    while (spawnTimer >= 1f && droplets.size < 18) {
-      droplets += InkDroplet(
-        id = nextDropletId,
-        x = 0.44f + (sequenceFloat(nextDropletId, salt = 5) * 0.12f),
-        y = 0.80f,
-        vx = (-0.05f + (sequenceFloat(nextDropletId, salt = 9) * 0.10f)),
-        vy = -0.08f - (signals.stability * 0.03f),
-        ink = 0.82f + (signals.correctionPulse * 0.10f),
-        age = 0f,
-        branchBias = (sequenceFloat(nextDropletId, salt = 12) - 0.5f) * 0.10f,
-      )
-      nextDropletId += 1
-      spawnTimer -= 1f
+    val pigment = FloatArray(INK_CELL_COUNT)
+    val wetness = FloatArray(INK_CELL_COUNT)
+    val edge = FloatArray(INK_CELL_COUNT)
+    state.cells.forEach { cell ->
+      val index = inkIndex(cell.column, cell.row)
+      pigment[index] = cell.pigment
+      wetness[index] = cell.wetness
+      edge[index] = cell.edge
     }
 
-    val updatedDroplets = mutableListOf<InkDroplet>()
-    droplets.forEach { droplet ->
-      val oldX = droplet.x
-      val oldY = droplet.y
-      val cohesion = 0.82f + (signals.stability * 0.12f) - (signals.noise * 0.08f)
-      val upwardPull = 0.20f + (signals.stability * 0.22f) + (signals.correctionPulse * 0.10f) - (signals.fatigue * 0.12f)
-      val wander = sin((nextTime * (1.2f + (droplet.id * 0.03f))) + droplet.id) * (0.05f + (signals.drift * 0.16f) + (signals.noise * 0.08f))
-      val nextVX = (droplet.vx * cohesion) + ((droplet.branchBias + wander) * dtSeconds * 2.2f)
-      val nextVY = (droplet.vy * (0.88f + (signals.stability * 0.07f))) - (upwardPull * dtSeconds)
-      val nextX = (droplet.x + (nextVX * dtSeconds)).coerceIn(0.08f, 0.92f)
-      val nextY = droplet.y + (nextVY * dtSeconds)
-      val nextInk = (droplet.ink - (dtSeconds * (0.12f + (signals.noise * 0.08f) + (signals.fatigue * 0.06f)))).coerceAtLeast(0f)
-      val nextAge = droplet.age + dtSeconds
-
-      segments += InkSegment(
-        startX = oldX,
-        startY = oldY,
-        endX = nextX,
-        endY = nextY,
-        width = (0.006f + (nextInk * 0.012f) + (signals.stability * 0.004f) - (signals.noise * 0.002f)).coerceIn(0.004f, 0.020f),
-        alpha = (0.12f + (nextInk * 0.42f) + (signals.correctionPulse * 0.10f)).coerceIn(0.10f, 0.72f),
+    val spawnEverySeconds = (1.10f - (signals.stability * 0.30f) + (signals.fatigue * 0.30f)).coerceIn(0.55f, 1.35f)
+    while (spawnTimer >= spawnEverySeconds) {
+      seedInkDrop(
+        pigment = pigment,
+        wetness = wetness,
+        edge = edge,
+        seedIndex = nextSeedIndex,
+        intensity = 0.28f + (signals.stability * 0.14f) + (signals.correctionPulse * 0.08f),
+        spread = 1.15f + (signals.drift * 0.55f),
       )
+      nextSeedIndex += 1
+      spawnTimer -= spawnEverySeconds
+    }
 
-      val shouldBranch = droplet.age < 0.32f && nextAge >= 0.32f && signals.drift > 0.20f && updatedDroplets.size < 18
-      if (shouldBranch) {
-        val branchDirection = if ((droplet.id + nextDropletId) % 2 == 0) -1f else 1f
-        val branchBias = branchDirection * (0.10f + (signals.drift * 0.16f) + (signals.noise * 0.04f))
-        updatedDroplets += InkDroplet(
-          id = nextDropletId,
-          x = nextX,
-          y = nextY,
-          vx = nextVX + (branchBias * 0.22f),
-          vy = nextVY * 0.85f,
-          ink = nextInk * 0.72f,
-          age = 0f,
-          branchBias = branchBias,
-        )
-        nextDropletId += 1
-      }
+    if (signals.correctionPulse > 0.10f) {
+      seedFocusedBloom(pigment, wetness, edge, signals.correctionPulse)
+    }
 
-      val shouldSplatter = droplet.age < 0.16f && nextAge >= 0.16f && signals.noise > 0.24f
-      if (shouldSplatter) {
-        blotches += InkBlotch(
-          x = nextX,
-          y = nextY,
-          radius = (0.006f + (signals.noise * 0.016f)).coerceAtMost(0.026f),
-          alpha = (0.10f + (signals.noise * 0.22f)).coerceAtMost(0.45f),
-        )
-      }
+    val nextPigment = FloatArray(INK_CELL_COUNT)
+    val nextWetness = FloatArray(INK_CELL_COUNT)
+    val nextEdge = FloatArray(INK_CELL_COUNT)
 
-      val keepsFlowing = nextInk > 0.08f && nextY > 0.10f && nextAge < 4.8f
-      if (keepsFlowing) {
-        updatedDroplets += droplet.copy(
-          x = nextX,
-          y = nextY,
-          vx = nextVX,
-          vy = nextVY,
-          ink = nextInk,
-          age = nextAge,
+    val diffusion = 0.18f + (signals.stability * 0.20f) + (signals.correctionPulse * 0.08f)
+    val driftBias = sin((nextTime * 0.9f).toDouble()).toFloat() * (0.05f + (signals.drift * 0.18f))
+    val evaporation = 0.02f + (signals.fatigue * 0.03f)
+    val absorption = 0.015f + (signals.stability * 0.01f)
+    val granulation = clamp01((signals.noise * 0.78f) + ((1f - signals.stability) * 0.12f))
+
+    for (row in 0 until INK_GRID_ROWS) {
+      for (column in 0 until INK_GRID_COLUMNS) {
+        val index = inkIndex(column, row)
+        val cellPigment = pigment[index]
+        val cellWetness = wetness[index]
+        val neighbors = neighborIndices(column, row)
+        val averagePigment = if (neighbors.isEmpty()) cellPigment else neighbors.sumOf { pigment[it].toDouble() }.toFloat() / neighbors.size.toFloat()
+        val averageWetness = if (neighbors.isEmpty()) cellWetness else neighbors.sumOf { wetness[it].toDouble() }.toFloat() / neighbors.size.toFloat()
+        val driftColumn = when {
+          driftBias > 0.02f -> min(column + 1, INK_GRID_COLUMNS - 1)
+          driftBias < -0.02f -> max(column - 1, 0)
+          else -> column
+        }
+        val driftIndex = inkIndex(driftColumn, min(row + 1, INK_GRID_ROWS - 1))
+        val downwardIndex = inkIndex(column, min(row + 1, INK_GRID_ROWS - 1))
+        val gradient = abs(cellPigment - averagePigment) + abs(cellWetness - averageWetness)
+        val flowToLower = cellWetness * (0.06f + ((1f - signals.stability) * 0.03f))
+
+        var nextCellWetness = cellWetness +
+          ((averageWetness - cellWetness) * diffusion * dtSeconds * 3.8f) -
+          (evaporation * dtSeconds) -
+          (absorption * dtSeconds * 0.4f)
+        nextCellWetness += wetness[driftIndex] * abs(driftBias) * dtSeconds * 0.28f
+
+        var nextCellPigment = cellPigment +
+          ((averagePigment - cellPigment) * diffusion * dtSeconds * 3.1f) +
+          ((pigment[driftIndex] - cellPigment) * abs(driftBias) * dtSeconds * 1.4f) -
+          (absorption * cellPigment * dtSeconds * 0.45f)
+
+        if (downwardIndex != index) {
+          nextCellPigment -= flowToLower * dtSeconds
+          nextPigment[downwardIndex] += flowToLower * dtSeconds
+          nextWetness[downwardIndex] += cellWetness * 0.02f * dtSeconds * 12f
+        }
+
+        val noiseFeather = if ((column + row + nextSeedIndex) % 5 == 0) {
+          signals.noise * 0.05f
+        } else {
+          0f
+        }
+        nextEdge[index] = clamp01(
+          approach(edge[index], clamp01((gradient * 0.85f) + noiseFeather + (granulation * 0.18f)), dtSeconds * 1.8f)
         )
-      } else {
-        blotches += InkBlotch(
-          x = nextX.coerceIn(0.08f, 0.92f),
-          y = nextY.coerceIn(0.10f, 0.92f),
-          radius = (0.010f + (nextInk * 0.020f)).coerceIn(0.008f, 0.028f),
-          alpha = (0.10f + (nextInk * 0.18f)).coerceIn(0.08f, 0.30f),
-        )
+        nextWetness[index] += nextCellWetness.coerceAtLeast(0f)
+        nextPigment[index] += nextCellPigment.coerceAtLeast(0f)
       }
     }
 
-    if (signals.correctionPulse > 0.35f && state.repairGlow < signals.correctionPulse) {
-      blotches += InkBlotch(
-        x = 0.50f,
-        y = 0.58f,
-        radius = 0.022f + (signals.correctionPulse * 0.020f),
-        alpha = 0.16f + (signals.correctionPulse * 0.10f),
-      )
+    val cells = ArrayList<InkCell>(INK_CELL_COUNT)
+    var completedCells = 0
+    for (row in 0 until INK_GRID_ROWS) {
+      for (column in 0 until INK_GRID_COLUMNS) {
+        val index = inkIndex(column, row)
+        val normalizedPigment = nextPigment[index].coerceIn(0f, 1f)
+        val normalizedWetness = nextWetness[index].coerceIn(0f, 1f)
+        val normalizedEdge = nextEdge[index].coerceIn(0f, 1f)
+        if (normalizedPigment > 0.08f || normalizedWetness > 0.06f) {
+          completedCells++
+        }
+        cells += InkCell(
+          column = column,
+          row = row,
+          pigment = normalizedPigment,
+          wetness = normalizedWetness,
+          edge = normalizedEdge,
+        )
+      }
     }
 
-    val cappedSegments = segments.takeLast(280)
-    val cappedBlotches = blotches.takeLast(42)
-    val furthestY = min(
-      updatedDroplets.minOfOrNull { it.y } ?: 0.82f,
-      cappedSegments.minOfOrNull { min(it.startY, it.endY) } ?: 0.82f,
-    )
-    val verticalReach = ((0.82f - furthestY) / 0.72f).coerceIn(0f, 1f)
+    val splatters = buildList {
+      addAll(state.splatters.takeLast(14).map {
+        it.copy(alpha = (it.alpha - (dtSeconds * 0.14f)).coerceAtLeast(0f))
+      }.filter { it.alpha > 0.02f })
+      if (signals.noise > 0.22f) {
+        val count = max(1, (signals.noise * 5f).roundToInt())
+        repeat(count) { splatIndex ->
+          val x = 0.12f + (sequenceFloat(nextSeedIndex + splatIndex, salt = 17) * 0.76f)
+          val y = 0.18f + (sequenceFloat(nextSeedIndex + splatIndex, salt = 23) * 0.64f)
+          add(
+            InkBlotch(
+              x = x,
+              y = y,
+              radius = 0.008f + (sequenceFloat(nextSeedIndex + splatIndex, salt = 31) * 0.020f),
+              alpha = 0.08f + (signals.noise * 0.24f),
+            )
+          )
+        }
+      }
+    }
+
     val completion = clamp01(
-      (cappedSegments.size / 240f) +
-        (verticalReach * 0.55f) +
-        (updatedDroplets.size * 0.01f) +
-        (signals.correctionPulse * 0.05f) -
-        (signals.fatigue * 0.05f)
+      (completedCells / INK_CELL_COUNT.toFloat()) +
+        (signals.correctionPulse * 0.06f) -
+        (signals.fatigue * 0.04f)
     )
 
     return state.copy(
       timeSeconds = nextTime,
-      droplets = updatedDroplets.takeLast(18),
-      segments = cappedSegments,
-      blotches = cappedBlotches,
-      spawnTimer = spawnTimer,
+      cells = cells,
+      splatters = splatters.takeLast(24),
       completion = completion,
-      splatter = approach(state.splatter, signals.noise, dtSeconds * 1.8f),
-      repairGlow = approach(state.repairGlow, signals.correctionPulse, dtSeconds * 2.1f),
-      nextDropletId = nextDropletId,
+      bloom = approach(state.bloom, signals.correctionPulse, dtSeconds * 2.0f),
+      granulation = approach(state.granulation, granulation, dtSeconds * 1.7f),
+      spawnTimer = spawnTimer,
+      nextSeedIndex = nextSeedIndex,
     )
   }
 
   override fun hud(state: InkGardenRuntimeState, signals: GameSignalSnapshot): GameHudState {
     return GameHudState(
       title = id.displayName(),
-      summaryLabel = "Growth",
+      summaryLabel = "Coverage",
       summaryValue = "${(state.completion * 100f).roundToInt()}%",
       inputHint = id.inputHint(),
       stabilityPercent = (signals.stability * 100f).roundToInt(),
@@ -627,11 +791,11 @@ class InkGardenController : GameController<InkGardenRuntimeState> {
 
   override fun audio(state: InkGardenRuntimeState, signals: GameSignalSnapshot): GameAudioState {
     return GameAudioState(
-      ambience = clamp01(0.16f + (state.completion * 0.44f)),
-      motion = clamp01((signals.drift * 0.40f) + (state.droplets.size * 0.04f)),
-      glitch = clamp01((signals.noise * 0.78f) + (state.splatter * 0.15f)),
-      accent = clamp01((signals.correctionPulse * 0.82f) + (state.repairGlow * 0.34f)),
-      warmth = clamp01(0.32f + (signals.stability * 0.24f) - (signals.fatigue * 0.16f)),
+      ambience = clamp01(0.14f + (state.completion * 0.40f)),
+      motion = clamp01((signals.drift * 0.34f) + (state.bloom * 0.12f)),
+      glitch = clamp01((signals.noise * 0.72f) + (state.granulation * 0.20f)),
+      accent = clamp01((signals.correctionPulse * 0.85f) + (state.bloom * 0.18f)),
+      warmth = clamp01(0.30f + (signals.stability * 0.20f) - (signals.fatigue * 0.15f)),
       muted = false,
     )
   }
@@ -649,11 +813,12 @@ class FireKeeperController : GameController<FireKeeperRuntimeState> {
     events: List<GameEvent>,
   ): FireKeeperRuntimeState {
     if (events.isNotEmpty()) {
-      // Fire Keeper stays passive in v1.
+      // Fire Keeper stays passive.
     }
     val nextTime = state.timeSeconds + dtSeconds
     val targetHeight = clamp01(0.28f + (signals.stability * 0.42f) + (signals.correctionPulse * 0.16f) - (signals.fatigue * 0.24f))
-    val leanWave = sin(nextTime * (1.8f + (signals.drift * 2.4f))) * (0.04f + (signals.drift * 0.12f) + (signals.noise * 0.05f))
+    val leanWave = sin((nextTime * (1.8f + (signals.drift * 2.4f))).toDouble()).toFloat() *
+      (0.04f + (signals.drift * 0.12f) + (signals.noise * 0.05f))
     return state.copy(
       timeSeconds = nextTime,
       flameHeight = approach(state.flameHeight, targetHeight, dtSeconds * (1.8f + (signals.stability * 2.8f))),
@@ -715,7 +880,7 @@ class ScriptoriumController : GameController<ScriptoriumRuntimeState> {
     events: List<GameEvent>,
   ): ScriptoriumRuntimeState {
     if (events.isNotEmpty()) {
-      // Scriptorium stays passive in v1.
+      // Scriptorium stays passive.
     }
     val nextTime = state.timeSeconds + dtSeconds
     val progressStep = (0.08f + (signals.stability * 0.24f) + (signals.correctionPulse * 0.10f) - (signals.fatigue * 0.07f)).coerceAtLeast(0.03f)
@@ -796,31 +961,174 @@ fun defaultGameHudState(gameId: GameId = GameId.SKY_TOWER): GameHudState {
 
 fun gameRuntimeSummary(state: GameRuntimeState): String {
   return when (state) {
-    is SkyTowerRuntimeState -> "blocks=${state.placements};misses=${state.misses};lastError=${String.format(Locale.US, "%.3f", state.lastError)}"
-    is InkGardenRuntimeState -> "droplets=${state.droplets.size};segments=${state.segments.size};completion=${String.format(Locale.US, "%.3f", state.completion)}"
+    is SkyTowerRuntimeState -> "blocks=${state.placements};misses=${state.misses};sway=${String.format(Locale.US, "%.3f", state.swaySeverity)}"
+    is InkGardenRuntimeState -> "coverage=${String.format(Locale.US, "%.3f", state.completion)};bloom=${String.format(Locale.US, "%.3f", state.bloom)}"
     is FireKeeperRuntimeState -> "height=${String.format(Locale.US, "%.3f", state.flameHeight)};smoke=${String.format(Locale.US, "%.3f", state.smokeDensity)}"
     is ScriptoriumRuntimeState -> "progress=${String.format(Locale.US, "%.3f", state.progress)};lines=${state.revealedLines}"
   }
 }
 
-private const val TOWER_GROUND_Y = 0.86f
+private const val TOWER_GROUND_Y = 0.88f
 private const val TOWER_BLOCK_HEIGHT = 0.055f
+private const val TOWER_BLOCK_WIDTH = 0.18f
+private const val TOWER_CARRIER_Y = 0.18f
+private const val TOWER_MIN_SUPPORT_RATIO = 0.24f
 
-private fun towerLandingCenterY(blockCount: Int): Float {
-  return TOWER_GROUND_Y - (TOWER_BLOCK_HEIGHT * (blockCount + 0.5f))
+private const val INK_GRID_COLUMNS = 24
+private const val INK_GRID_ROWS = 16
+private const val INK_CELL_COUNT = INK_GRID_COLUMNS * INK_GRID_ROWS
+
+private data class TowerSupportContact(
+  val supportId: Int?,
+  val grounded: Boolean,
+  val topY: Float,
+  val supportCenter: Float,
+  val supportRatio: Float,
+)
+
+private fun towerFoundation(): TowerBody {
+  return TowerBody(
+    id = 0,
+    x = 0.50f,
+    y = TOWER_GROUND_Y - (TOWER_BLOCK_HEIGHT / 2f),
+    width = 0.28f,
+    sleeping = true,
+    grounded = true,
+  )
 }
 
-private fun spawnedTowerState(
-  state: SkyTowerRuntimeState,
-  width: Float,
-  spawnIndex: Int,
-): SkyTowerRuntimeState {
-  val spawnFromLeft = spawnIndex % 2 == 0
-  return state.copy(
-    activeX = if (spawnFromLeft) 0.22f else 0.78f,
-    activeY = -0.12f,
-    activeVX = if (spawnFromLeft) 0.11f else -0.11f,
-    activeVY = 0.12f,
-    activeWidth = width.coerceIn(0.08f, 0.18f),
-  )
+private fun towerSwaySeverity(bodies: List<TowerBody>): Float {
+  if (bodies.size <= 1) return 0f
+  val upperBodies = bodies.drop(1)
+  val averageAngle = upperBodies.sumOf { abs(it.angle).toDouble() }.toFloat() / upperBodies.size.toFloat()
+  val averageMotion = upperBodies.sumOf { (abs(it.vx) + abs(it.angularVelocity)).toDouble() }.toFloat() / upperBodies.size.toFloat()
+  return clamp01((averageAngle * 2.8f) + (averageMotion * 1.6f))
+}
+
+private fun bodiesBelow(body: TowerBody, allBodies: List<TowerBody>): List<TowerBody> {
+  return allBodies.filter { it.id != body.id && it.y > body.y }
+}
+
+private fun findSupportContact(
+  body: TowerBody,
+  index: Int,
+  allBodies: List<TowerBody>,
+): TowerSupportContact? {
+  val bottom = body.y + (body.height / 2f)
+  if (bottom >= TOWER_GROUND_Y) {
+    return TowerSupportContact(
+      supportId = null,
+      grounded = true,
+      topY = TOWER_GROUND_Y,
+      supportCenter = body.x,
+      supportRatio = 1f,
+    )
+  }
+
+  var best: TowerSupportContact? = null
+  for (otherIndex in 0 until index) {
+    val support = allBodies[otherIndex]
+    if (support.id == body.id) continue
+    if (support.y <= body.y) continue
+    val topY = support.y - (support.height / 2f)
+    val verticalGap = topY - bottom
+    if (verticalGap > body.height * 0.75f) continue
+    val overlap = overlapWidth(body.x, body.width, support.x, support.width)
+    if (overlap <= 0f) continue
+    val contact = TowerSupportContact(
+      supportId = support.id,
+      grounded = false,
+      topY = topY,
+      supportCenter = overlapCenter(body.x, body.width, support.x, support.width),
+      supportRatio = overlap / body.width,
+    )
+    if (best == null || contact.topY < best.topY) {
+      best = contact
+    }
+  }
+  return best
+}
+
+private fun overlapWidth(centerA: Float, widthA: Float, centerB: Float, widthB: Float): Float {
+  val left = max(centerA - (widthA / 2f), centerB - (widthB / 2f))
+  val right = min(centerA + (widthA / 2f), centerB + (widthB / 2f))
+  return (right - left).coerceAtLeast(0f)
+}
+
+private fun overlapCenter(centerA: Float, widthA: Float, centerB: Float, widthB: Float): Float {
+  val left = max(centerA - (widthA / 2f), centerB - (widthB / 2f))
+  val right = min(centerA + (widthA / 2f), centerB + (widthB / 2f))
+  return (left + right) / 2f
+}
+
+private fun inkIndex(column: Int, row: Int): Int = (row * INK_GRID_COLUMNS) + column
+
+private fun initialInkCells(): List<InkCell> {
+  return buildList(INK_CELL_COUNT) {
+    for (row in 0 until INK_GRID_ROWS) {
+      for (column in 0 until INK_GRID_COLUMNS) {
+        add(InkCell(column = column, row = row, pigment = 0f, wetness = 0f, edge = 0f))
+      }
+    }
+  }
+}
+
+private fun neighborIndices(column: Int, row: Int): List<Int> {
+  val indices = ArrayList<Int>(8)
+  for (dRow in -1..1) {
+    for (dColumn in -1..1) {
+      if (dColumn == 0 && dRow == 0) continue
+      val nextColumn = column + dColumn
+      val nextRow = row + dRow
+      if (nextColumn !in 0 until INK_GRID_COLUMNS || nextRow !in 0 until INK_GRID_ROWS) continue
+      indices += inkIndex(nextColumn, nextRow)
+    }
+  }
+  return indices
+}
+
+private fun seedInkDrop(
+  pigment: FloatArray,
+  wetness: FloatArray,
+  edge: FloatArray,
+  seedIndex: Int,
+  intensity: Float,
+  spread: Float,
+) {
+  val centerX = 0.30f + (sequenceFloat(seedIndex, salt = 5) * 0.40f)
+  val centerY = 0.62f + (sequenceFloat(seedIndex, salt = 11) * 0.20f)
+  val radiusCells = 1.4f + (sequenceFloat(seedIndex, salt = 17) * spread)
+  for (row in 0 until INK_GRID_ROWS) {
+    for (column in 0 until INK_GRID_COLUMNS) {
+      val x = (column + 0.5f) / INK_GRID_COLUMNS.toFloat()
+      val y = (row + 0.5f) / INK_GRID_ROWS.toFloat()
+      val dx = x - centerX
+      val dy = y - centerY
+      val distance = (abs(dx) * 0.75f) + abs(dy)
+      val influence = clamp01(1f - (distance * radiusCells * 1.8f))
+      if (influence <= 0f) continue
+      val index = inkIndex(column, row)
+      pigment[index] = (pigment[index] + (influence * intensity)).coerceAtMost(1f)
+      wetness[index] = (wetness[index] + (influence * (0.20f + (intensity * 0.50f)))).coerceAtMost(1f)
+      edge[index] = max(edge[index], influence * 0.10f)
+    }
+  }
+}
+
+private fun seedFocusedBloom(
+  pigment: FloatArray,
+  wetness: FloatArray,
+  edge: FloatArray,
+  correctionPulse: Float,
+) {
+  val centerColumn = INK_GRID_COLUMNS / 2
+  val centerRow = INK_GRID_ROWS / 2
+  for (row in max(0, centerRow - 2)..min(INK_GRID_ROWS - 1, centerRow + 2)) {
+    for (column in max(0, centerColumn - 2)..min(INK_GRID_COLUMNS - 1, centerColumn + 2)) {
+      val index = inkIndex(column, row)
+      pigment[index] = (pigment[index] + (correctionPulse * 0.16f)).coerceAtMost(1f)
+      wetness[index] = (wetness[index] + (correctionPulse * 0.12f)).coerceAtMost(1f)
+      edge[index] = max(edge[index], correctionPulse * 0.14f)
+    }
+  }
 }

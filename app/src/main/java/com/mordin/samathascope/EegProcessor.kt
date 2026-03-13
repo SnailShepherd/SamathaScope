@@ -42,6 +42,8 @@ class EegProcessor(
   private val windowSize: Int = sampleRateHz * 8,
   private val hopSize: Int = sampleRateHz,
   rawPreviewSeconds: Int = 20,
+  rawHistorySeconds: Int = 600,
+  private val rawHistoryRateHz: Int = 32,
 ) {
   private val ring = IntArray(windowSize)
   private val timeRing = LongArray(windowSize)
@@ -53,6 +55,12 @@ class EegProcessor(
   private val previewSize = (sampleRateHz * rawPreviewSeconds).coerceAtLeast(sampleRateHz)
   private val preview = IntArray(previewSize)
   private var previewPos = 0
+  private val rawHistoryDecimation = (sampleRateHz / rawHistoryRateHz).coerceAtLeast(1)
+  private val rawHistorySize = (rawHistorySeconds * rawHistoryRateHz).coerceAtLeast(rawHistoryRateHz * 10)
+  private val rawHistory = IntArray(rawHistorySize)
+  private var rawHistoryPos = 0
+  private var rawHistoryCounter = 0
+  private var rawHistoryCount = 0
 
   fun setNotchEnabled(enabled: Boolean) {
     notch50Enabled = enabled
@@ -66,6 +74,10 @@ class EegProcessor(
     hopCounter = 0
     preview.fill(0)
     previewPos = 0
+    rawHistory.fill(0)
+    rawHistoryPos = 0
+    rawHistoryCounter = 0
+    rawHistoryCount = 0
   }
 
   fun rawPreview(maxSamples: Int): List<Int> {
@@ -78,6 +90,28 @@ class EegProcessor(
     return out.toList()
   }
 
+  fun rawHistory(maxSamples: Int, offsetSamples: Int = 0): List<Int> {
+    val count = maxSamples.coerceAtLeast(1).coerceAtMost(rawHistorySize)
+    val safeOffset = offsetSamples.coerceAtLeast(0)
+    val available = (rawHistoryCount - safeOffset).coerceAtLeast(0)
+    if (available <= 0) return emptyList()
+    val end = (rawHistoryPos - safeOffset).mod(rawHistorySize)
+    val actualCount = count.coerceAtMost(available)
+    val out = IntArray(actualCount)
+    val start = (end - actualCount + rawHistorySize) % rawHistorySize
+    for (i in 0 until actualCount) {
+      out[i] = rawHistory[(start + i) % rawHistorySize]
+    }
+    return out.toList()
+  }
+
+  fun rawHistoryRateHz(): Int = rawHistoryRateHz
+
+  fun maxRawHistoryOffsetSeconds(windowSeconds: Int): Int {
+    val windowSamples = (windowSeconds * rawHistoryRateHz).coerceAtLeast(1)
+    return ((rawHistoryCount - windowSamples).coerceAtLeast(0) / rawHistoryRateHz).coerceAtLeast(0)
+  }
+
   fun pushRaw(sample: Int, timestampMs: Long): EegFeatures? {
     ring[ringPos] = sample
     timeRing[ringPos] = timestampMs
@@ -86,6 +120,13 @@ class EegProcessor(
 
     preview[previewPos] = sample
     previewPos = (previewPos + 1) % previewSize
+    rawHistoryCounter++
+    if (rawHistoryCounter >= rawHistoryDecimation) {
+      rawHistory[rawHistoryPos] = sample
+      rawHistoryPos = (rawHistoryPos + 1) % rawHistorySize
+      rawHistoryCount = (rawHistoryCount + 1).coerceAtMost(rawHistorySize)
+      rawHistoryCounter = 0
+    }
 
     hopCounter++
     if (totalSamples < windowSize) return null

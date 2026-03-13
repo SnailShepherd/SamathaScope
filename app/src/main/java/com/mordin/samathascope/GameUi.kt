@@ -26,11 +26,13 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -103,8 +105,8 @@ private fun SkyTowerScene(
   inputEnabled: Boolean,
   onGameTap: () -> Unit,
 ) {
-  val skyTop = Color(0xFFDCEEFF)
-  val skyBottom = Color(0xFFEEF5D9)
+  val skyTop = Color(0xFFD9EFF7)
+  val skyBottom = Color(0xFFF2EAD0)
 
   Box(
     modifier = Modifier
@@ -124,80 +126,94 @@ private fun SkyTowerScene(
     ) {
       val w = size.width
       val h = size.height
-      val groundY = h * 0.86f
+      val groundY = h * 0.88f
       val blockHeight = h * 0.055f
 
       drawRect(
         brush = Brush.verticalGradient(
-          listOf(Color(0x00FFFFFF), Color(0x22FFFFFF), Color(0x33A3C0D4)),
+          listOf(Color(0x00FFFFFF), Color(0x22FFFFFF), Color(0x22B7CCDD)),
         ),
         topLeft = Offset.Zero,
         size = Size(w, groundY),
       )
       drawRect(
-        color = Color(0xFFC3B38B),
+        color = Color(0xFFC7B691),
         topLeft = Offset(0f, groundY),
         size = Size(w, h - groundY),
       )
 
-      if (state.assistSeconds > 0.01f || signals.correctionPulse > 0.10f) {
-        val captureGlow = max((state.assistSeconds / 0.75f).coerceIn(0f, 1f), signals.correctionPulse)
-        val topBlock = state.blocks.last()
+      if (state.carrier.visible) {
+        val carrierX = state.carrier.x * w
+        val carrierY = state.carrier.y * h
+        drawLine(
+          color = Color(0x6671867D),
+          start = Offset(w * 0.12f, carrierY - (h * 0.035f)),
+          end = Offset(w * 0.88f, carrierY - (h * 0.035f)),
+          strokeWidth = 3f,
+        )
         drawRoundRect(
-          color = Color(0x33F4E9A4),
+          color = Color(0xFF7F7864),
+          topLeft = Offset(carrierX - (w * 0.045f), carrierY - (h * 0.045f)),
+          size = Size(w * 0.09f, h * 0.018f),
+          cornerRadius = CornerRadius(12f, 12f),
+        )
+        drawRoundRect(
+          color = Color(0xFFD08A51),
+          topLeft = Offset(carrierX - ((state.carrier.width * w) / 2f), carrierY - (blockHeight / 2f)),
+          size = Size(state.carrier.width * w, blockHeight),
+          cornerRadius = CornerRadius(10f, 10f),
+        )
+      }
+
+      state.bodies.forEachIndexed { index, body ->
+        val widthPx = body.width * w
+        val heightPx = body.height * h
+        val center = Offset(body.x * w, body.y * h)
+        val angleDegrees = body.angle * 57.29578f
+        val baseColor = when {
+          body.id == state.activeBodyId -> Color(0xFFE29C5C)
+          index == 0 -> Color(0xFF7A573A)
+          body.sleeping -> Color(0xFF8F603C)
+          else -> Color(0xFFB47445)
+        }
+        val shadowAlpha = if (body.id == state.activeBodyId) 0.22f else 0.12f
+        drawRoundRect(
+          color = Color.Black.copy(alpha = shadowAlpha),
           topLeft = Offset(
-            ((topBlock.x + (state.towerSway * 0.08f)) * w) - (w * 0.12f),
-            groundY - ((state.blocks.size + 1) * blockHeight) - (h * 0.02f),
+            center.x - (widthPx * 0.44f),
+            min(groundY - (heightPx * 0.2f), center.y + (heightPx * 0.55f))
           ),
-          size = Size(w * 0.24f, h * (0.04f + (captureGlow * 0.05f))),
-          cornerRadius = CornerRadius(20f, 20f),
+          size = Size(widthPx * 0.88f, h * 0.012f),
+          cornerRadius = CornerRadius(18f, 18f),
         )
+        rotate(
+          degrees = angleDegrees,
+          pivot = center,
+        ) {
+          drawRoundRect(
+            color = baseColor,
+            topLeft = Offset(center.x - (widthPx / 2f), center.y - (heightPx / 2f)),
+            size = Size(widthPx, heightPx),
+            cornerRadius = CornerRadius(10f, 10f),
+          )
+        }
       }
 
-      state.blocks.forEachIndexed { index, block ->
-        val blockWidth = block.width * w
-        val swayOffset = state.towerSway * w * (0.10f + (index * 0.015f))
-        val centerX = (block.x * w) + swayOffset
-        val topY = groundY - ((index + 1) * blockHeight)
-        drawRoundRect(
-          color = if (index == 0) Color(0xFF7B5639) else Color(0xFF95653F),
-          topLeft = Offset(centerX - (blockWidth / 2f), topY),
-          size = Size(blockWidth, blockHeight),
-          cornerRadius = CornerRadius(8f, 8f),
-        )
-      }
-
-      val fallingWidth = w * state.activeWidth
-      val tremorOffset = sin(state.timeSeconds * 20f) * state.tremor * 8f
-      val fallingCenter = Offset((state.activeX * w) + tremorOffset, state.activeY * h)
-      val shadowWidth = fallingWidth * 0.85f
-      drawRoundRect(
-        color = Color(0x22000000),
-        topLeft = Offset(
-          fallingCenter.x - (shadowWidth / 2f),
-          (groundY - (blockHeight * 0.2f)) + min(state.activeY * h * 0.04f, h * 0.02f),
-        ),
-        size = Size(shadowWidth, h * 0.014f),
-        cornerRadius = CornerRadius(30f, 30f),
-      )
-      drawRoundRect(
-        color = if (state.assistSeconds > 0.02f) Color(0xFFE39B57) else Color(0xFFC9784B),
-        topLeft = Offset(fallingCenter.x - (fallingWidth / 2f), fallingCenter.y - (blockHeight / 2f)),
-        size = Size(fallingWidth, blockHeight),
-        cornerRadius = CornerRadius(10f, 10f),
-      )
-
-      if (signals.correctionPulse > 0f) {
+      if (signals.correctionPulse > 0.05f) {
         drawCircle(
-          color = Color(0x55FFF0A8),
-          radius = h * (0.08f + (signals.correctionPulse * 0.05f)),
-          center = Offset(w * 0.5f, groundY - (state.blocks.size * h * 0.025f)),
+          color = Color(0x44FFF0A8),
+          radius = h * (0.10f + (signals.correctionPulse * 0.04f)),
+          center = Offset(w * 0.5f, groundY - (h * 0.20f)),
         )
       }
     }
 
     Text(
-      text = if (inputEnabled) "Tap to guide block" else "Press Start to begin",
+      text = when {
+        !inputEnabled -> "Press Start to begin"
+        state.activeBodyId != null -> "Block in flight"
+        else -> "Tap to release"
+      },
       modifier = Modifier
         .align(Alignment.TopEnd)
         .padding(10.dp),
@@ -219,7 +235,7 @@ private fun InkGardenScene(
       .height(280.dp)
       .background(
         brush = Brush.linearGradient(
-          listOf(Color(0xFFF7F0DD), Color(0xFFE7E1CC), Color(0xFFF3F3EC)),
+          listOf(Color(0xFFF5EFD8), Color(0xFFE9E1C8), Color(0xFFF3F1E7)),
         ),
         shape = RoundedCornerShape(4.dp),
       )
@@ -232,56 +248,66 @@ private fun InkGardenScene(
     ) {
       val w = size.width
       val h = size.height
-      val inkColor = Color(0xFF244A3B).copy(alpha = (0.72f - (signals.fatigue * 0.10f)).coerceIn(0.52f, 0.78f))
-      val accentInk = if (signals.correctionPulse > 0.18f) {
-        Color(0xFF4B8B72)
-      } else {
-        Color(0xFF396E59)
-      }
+      val columns = (state.cells.maxOfOrNull { it.column } ?: 0) + 1
+      val rows = (state.cells.maxOfOrNull { it.row } ?: 0) + 1
+      val cellWidth = w / columns.toFloat().coerceAtLeast(1f)
+      val cellHeight = h / rows.toFloat().coerceAtLeast(1f)
+      val inkBase = Color(0xFF25473B)
+      val accentInk = Color(0xFF3E7B67)
 
-      state.blotches.forEach { blotch ->
-        drawCircle(
-          color = inkColor.copy(alpha = blotch.alpha),
-          radius = blotch.radius * min(w, h),
-          center = Offset(blotch.x * w, blotch.y * h),
-        )
-      }
-
-      state.segments.forEachIndexed { index, segment ->
-        val tint = if (index % 7 == 0) accentInk else inkColor
+      repeat(28) { line ->
+        val y = h * (line / 28f)
         drawLine(
-          color = tint.copy(alpha = segment.alpha),
-          start = Offset(segment.startX * w, segment.startY * h),
-          end = Offset(segment.endX * w, segment.endY * h),
-          strokeWidth = segment.width * min(w, h),
-          cap = StrokeCap.Round,
+          color = Color(0x11B59D7B),
+          start = Offset(0f, y),
+          end = Offset(w, y + (sin(line.toDouble()).toFloat() * 2f)),
+          strokeWidth = 1f,
         )
       }
 
-      state.droplets.forEach { droplet ->
+      state.cells.forEach { cell ->
+        if (cell.pigment < 0.02f && cell.wetness < 0.02f && cell.edge < 0.02f) return@forEach
+        val center = Offset(
+          x = (cell.column + 0.5f) * cellWidth,
+          y = (cell.row + 0.5f) * cellHeight,
+        )
+        val baseRadius = min(cellWidth, cellHeight) * (0.34f + (cell.wetness * 0.55f))
+        if (cell.wetness > 0.03f) {
+          drawCircle(
+            color = accentInk.copy(alpha = (0.04f + (cell.wetness * 0.16f)).coerceIn(0.03f, 0.20f)),
+            radius = baseRadius * (1.2f + (cell.wetness * 0.8f)),
+            center = center,
+          )
+        }
+        if (cell.edge > 0.04f) {
+          drawCircle(
+            color = inkBase.copy(alpha = (0.05f + (cell.edge * 0.22f)).coerceIn(0.05f, 0.24f)),
+            radius = baseRadius * (0.95f + (cell.edge * 0.45f)),
+            center = center,
+            style = Stroke(width = max(1.5f, baseRadius * 0.18f)),
+          )
+        }
         drawCircle(
-          color = accentInk.copy(alpha = (0.28f + (droplet.ink * 0.34f)).coerceIn(0.18f, 0.62f)),
-          radius = h * (0.006f + (droplet.ink * 0.012f)),
-          center = Offset(droplet.x * w, droplet.y * h),
+          color = inkBase.copy(alpha = (0.05f + (cell.pigment * 0.46f) - (signals.fatigue * 0.08f)).coerceIn(0.04f, 0.54f)),
+          radius = baseRadius,
+          center = center,
         )
       }
 
-      val splatterCount = max(1, (state.splatter * 10f).roundToInt())
-      repeat(splatterCount) { index ->
-        val x = w * (0.12f + (sequenceFloat(index, 11) * 0.76f))
-        val y = h * (0.10f + (sequenceFloat(index, 13) * 0.74f))
+      state.splatters.forEach { splatter ->
         drawCircle(
-          color = inkColor.copy(alpha = 0.05f + (state.splatter * 0.12f)),
-          radius = h * (0.003f + (sequenceFloat(index, 7) * 0.010f)),
-          center = Offset(x, y),
+          color = inkBase.copy(alpha = splatter.alpha),
+          radius = splatter.radius * min(w, h),
+          center = Offset(splatter.x * w, splatter.y * h),
         )
       }
 
-      if (state.repairGlow > 0.05f) {
+      if (state.bloom > 0.05f) {
         drawCircle(
-          color = Color(0x33D8F1CC),
-          radius = h * (0.16f + (state.repairGlow * 0.06f)),
-          center = Offset(w * 0.5f, h * 0.55f),
+          color = Color(0x33D9F4E3),
+          radius = h * (0.12f + (state.bloom * 0.06f)),
+          center = Offset(w * 0.5f, h * 0.50f),
+          style = Fill,
         )
       }
     }
@@ -334,7 +360,6 @@ private fun FireKeeperScene(
       )
 
       val flameHeight = h * (0.18f + (state.flameHeight * 0.28f))
-      val flameWidth = w * (0.12f + (state.turbulence * 0.08f))
       val leanPx = state.lean * w * 0.15f
       val flamePath = Path().apply {
         moveTo(w * 0.5f, baseY)
@@ -354,7 +379,7 @@ private fun FireKeeperScene(
       drawPath(flamePath, brush = Brush.verticalGradient(listOf(Color(0xFFFF8C42), Color(0xFFFFD166), Color(0x99FF5F2E))))
       drawCircle(
         color = Color(0x44FFCF77),
-        radius = flameWidth * (0.8f + (state.warmth * 0.8f)),
+        radius = w * (0.10f + (state.warmth * 0.05f)),
         center = Offset((w * 0.5f) + leanPx, baseY - (flameHeight * 0.5f)),
       )
 
@@ -418,7 +443,7 @@ private fun ScriptoriumScene(
           for (segment in 1..10) {
             val t = segment / 10f
             val x = (w * 0.08f) + (lineLength * t)
-            val y = startY + sin((state.timeSeconds * 1.2f) + (segment * 0.8f) + index) * wobble
+            val y = startY + sin(((state.timeSeconds * 1.2f) + (segment * 0.8f) + index).toDouble()).toFloat() * wobble
             lineTo(x, y)
           }
         }

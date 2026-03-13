@@ -80,8 +80,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   private var pausedAccumMs: Long = 0L
   private var sessionJob: Job? = null
   private var gameLoopJob: Job? = null
-  private var audioStopJob: Job? = null
-  private var gameAudioStopJob: Job? = null
 
   private var audio: NoiseAudioEngine? = null
   private var gameAudio: GameSoundEngine? = null
@@ -143,7 +141,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   fun selectTab(tab: AppTab) {
     _ui.update { it.copy(selectedTab = tab) }
-    syncFeedbackAudioState(fadeIn = true)
+    syncFeedbackAudioState()
   }
 
   fun selectGame(gameId: GameId) {
@@ -161,7 +159,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       )
     }
     refreshSelectedGameUi()
-    syncFeedbackAudioState(fadeIn = true)
+    syncFeedbackAudioState()
   }
 
   fun startGame() {
@@ -180,7 +178,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
     refreshSelectedGameUi()
     gameAudio?.update(_ui.value.selectedGameId, _ui.value.gameAudioState)
-    syncFeedbackAudioState(fadeIn = true)
+    syncFeedbackAudioState()
   }
 
   fun onGameTap() {
@@ -297,6 +295,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         audioRunning = audio != null && it.audioEnabled,
         audioMuted = true,
         metricPlotSeries = emptyMap(),
+        rawPlotOffsetSeconds = 0,
+        metricPlotOffsetSeconds = 0,
         gameRunning = false,
         gameSignals = initialGameSignals,
         gameRuntimeState = initialRuntimeState,
@@ -308,6 +308,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     refreshRawPreview()
     refreshMetricPlotSeries()
     refreshSelectedGameUi()
+    ensureSessionAudioEngines(fadeIn = false)
     syncFeedbackAudioState(fadeIn = false)
 
     sessionJob = viewModelScope.launch(Dispatchers.Default) {
@@ -348,8 +349,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     gameLoopJob?.cancel()
     gameLoopJob = null
 
-    muteAudioAndStopLater()
-    muteGameAudioAndStopLater()
+    shutdownAudioEngines()
 
     recorder?.stop()
     recorder = null
@@ -394,7 +394,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     } else {
       pausedAccumMs += (now - pausedAtMs).coerceAtLeast(0L)
       pausedAtMs = 0L
-      _ui.update { it.copy(sessionPaused = false) }
+      _ui.update { it.copy(sessionPaused = false, rawPlotOffsetSeconds = 0, metricPlotOffsetSeconds = 0) }
+      refreshRawPreview()
+      refreshMetricPlotSeries()
       syncFeedbackAudioState(fadeIn = true)
     }
     refreshSelectedGameUi()
@@ -406,10 +408,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     if (next.contains(type)) {
       if (next.size > 1) next.remove(type)
     } else {
-      if (next.size >= 4) {
-        val first = next.firstOrNull()
-        if (first != null) next.remove(first)
-      }
       next.add(type)
     }
     _ui.update { it.copy(visibleMetrics = next, selectedMetricInfo = type) }
@@ -422,19 +420,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   fun setFeedbackMetric(value: PlotType) {
     if (!rewardSelectableMetrics().contains(value)) return
-    val visible = LinkedHashSet(_ui.value.visibleMetrics)
-    if (!visible.contains(value)) {
-      if (visible.size >= 4) {
-        val first = visible.firstOrNull()
-        if (first != null) visible.remove(first)
-      }
-      visible.add(value)
-    }
     _ui.update {
       it.copy(
         feedbackMetric = value,
         selectedMetricInfo = value,
-        visibleMetrics = visible,
       )
     }
     refreshMetricPlotSeries()
@@ -442,12 +431,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   fun setAudioEnabled(value: Boolean) {
     _ui.update { it.copy(audioEnabled = value) }
-    syncFeedbackAudioState(fadeIn = value)
+    if (!value) {
+      shutdownAudioEngines()
+      _ui.update { it.copy(audioRunning = false, audioMuted = true) }
+    } else {
+      ensureSessionAudioEngines(fadeIn = true)
+      syncFeedbackAudioState(fadeIn = true)
+    }
   }
 
   fun setInvertReward(value: Boolean) = _ui.update { it.copy(invertReward = value) }
-
-  fun setCrackleEnabled(value: Boolean) = _ui.update { it.copy(crackleEnabled = value) }
 
   fun setGamma(value: Float) = _ui.update { it.copy(gamma = value) }
 
@@ -455,9 +448,33 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   fun setGMaxDb(value: Int) = _ui.update { it.copy(gMaxDb = max(value, _ui.value.gMinDb + 1)) }
 
-  fun setCrackleIntensity(value: Float) = _ui.update { it.copy(crackleIntensity = value) }
-
   fun setRecordingEnabled(value: Boolean) = _ui.update { it.copy(recordingEnabled = value) }
+
+  fun panRawPlotBy(deltaSeconds: Int) {
+    if (!canPanPlots()) return
+    val current = _ui.value.rawPlotOffsetSeconds
+    val maxOffset = eegProcessor.maxRawHistoryOffsetSeconds(_ui.value.plotSettings.getValue(PlotType.RAW).windowSeconds)
+    _ui.update { it.copy(rawPlotOffsetSeconds = (current + deltaSeconds).coerceIn(0, maxOffset)) }
+    refreshRawPreview()
+  }
+
+  fun panMetricPlotBy(deltaSeconds: Int) {
+    if (!canPanPlots()) return
+    val windowSeconds = _ui.value.plotSettings.getValue(PlotType.MEDITATION_PROXY).windowSeconds
+    val maxOffset = _ui.value.visibleMetrics.maxOfOrNull { metricHistory.maxOffsetSeconds(it, windowSeconds) } ?: 0
+    _ui.update { it.copy(metricPlotOffsetSeconds = (_ui.value.metricPlotOffsetSeconds + deltaSeconds).coerceIn(0, maxOffset)) }
+    refreshMetricPlotSeries()
+  }
+
+  fun resetRawPlotToLatest() {
+    _ui.update { it.copy(rawPlotOffsetSeconds = 0) }
+    refreshRawPreview()
+  }
+
+  fun resetMetricPlotToLatest() {
+    _ui.update { it.copy(metricPlotOffsetSeconds = 0) }
+    refreshMetricPlotSeries()
+  }
 
   fun setNotch50Enabled(value: Boolean) {
     eegProcessor.setNotchEnabled(value)
@@ -571,7 +588,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val features = eegProcessor.pushRaw(raw, now)
 
     rawPreviewDecim++
-    if (rawPreviewDecim % 32 == 0) {
+    if (!_ui.value.sessionPaused && rawPreviewDecim % 32 == 0) {
       refreshRawPreview()
     }
 
@@ -648,10 +665,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       type = _ui.value.feedbackMetric,
       meditationProxy = smoothedMeditationProxy,
       settledness = smoothedSettledness,
-      control = smoothedControl,
       alertness = smoothedAlertness,
-      qualityConfidence = smoothedQualityConfidence,
-      effortfulFocus = smoothedProbabilities.effortfulFocus,
     )
 
     gameSignalMapper.updateFromClassifier(
@@ -677,16 +691,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     val shouldNoiseAudioRun = shouldNoiseAudioBeAudible()
     if (shouldNoiseAudioRun) {
-      startAudioEngineIfNeeded()
+      ensureSessionAudioEngines()
       audio?.update(
         feedbackValue = feedback,
-        artefactA = smoothedArtefact,
         invertReward = _ui.value.invertReward,
         gamma = _ui.value.gamma,
         gMinDb = _ui.value.gMinDb,
         gMaxDb = _ui.value.gMaxDb,
-        crackleEnabled = _ui.value.crackleEnabled,
-        crackleIntensity = _ui.value.crackleIntensity,
       )
       audio?.setMuted(false)
     } else {
@@ -750,7 +761,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         artefactBlinkNormalizationHz = artefactCalibrationProfile.blinkNormalizationHz,
         artefactEmgNormalizationHfRatio = artefactCalibrationProfile.emgNormalizationHfRatio,
         streamStallMs = features.maxGapMs,
-        audioRunning = it.audioEnabled && (audio != null || gameAudio != null),
+        audioRunning = shouldNoiseAudioRun || shouldGameAudioBeAudible(),
         audioMuted = !(shouldNoiseAudioRun || shouldGameAudioBeAudible()),
         audioBaseDb = audio?.debugBaseDb ?: it.audioBaseDb,
         gameSignals = gameSignals,
@@ -872,18 +883,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     type: PlotType,
     meditationProxy: Float,
     settledness: Float,
-    control: Float,
     alertness: Float,
-    qualityConfidence: Float,
-    effortfulFocus: Float,
   ): Float {
     return when (type) {
       PlotType.MEDITATION_PROXY -> meditationProxy
-      PlotType.SETTLEDNESS -> (settledness * alertness * qualityConfidence).coerceIn(0f, 1f)
-      PlotType.CONTROL -> (control * alertness * qualityConfidence).coerceIn(0f, 1f)
-      PlotType.ALERTNESS -> (alertness * qualityConfidence).coerceIn(0f, 1f)
-      PlotType.QUALITY_CONFIDENCE -> (qualityConfidence * alertness).coerceIn(0f, 1f)
-      PlotType.EFFORTFUL_FOCUS_SCORE -> (effortfulFocus * alertness * qualityConfidence).coerceIn(0f, 1f)
+      PlotType.SETTLEDNESS -> settledness
+      PlotType.ALERTNESS -> alertness
       else -> 0f
     }
   }
@@ -918,7 +923,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             )
 
             if (shouldGameAudioBeAudible()) {
-              startGameAudioEngineIfNeeded()
+              ensureSessionAudioEngines()
               gameAudio?.update(_ui.value.selectedGameId, nextGameAudioState)
               gameAudio?.setMuted(false)
             } else {
@@ -931,7 +936,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 gameRuntimeState = nextRuntimeState,
                 gameAudioState = nextGameAudioState,
                 gameHudState = nextHudState,
-                audioRunning = it.audioEnabled && (audio != null || gameAudio != null),
+                audioRunning = shouldNoiseAudioBeAudible() || shouldGameAudioBeAudible(),
                 audioMuted = !(shouldNoiseAudioBeAudible() || shouldGameAudioBeAudible()),
               )
             }
@@ -1048,92 +1053,63 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
   }
 
-  private fun startAudioEngineIfNeeded() {
-    if (!_ui.value.audioEnabled) return
-    cancelPendingAudioStop()
+  private fun ensureSessionAudioEngines(fadeIn: Boolean = false) {
+    if (!_ui.value.audioEnabled || !_ui.value.sessionRunning) return
     if (audio == null) {
       audio = NoiseAudioEngine().apply {
         start()
         setMuted(true)
       }
     }
-  }
-
-  private fun startGameAudioEngineIfNeeded() {
-    if (!_ui.value.audioEnabled) return
-    cancelPendingGameAudioStop()
     if (gameAudio == null) {
       gameAudio = GameSoundEngine().apply {
         start()
         setMuted(true)
       }
     }
-  }
-
-  private fun cancelPendingAudioStop() {
-    audioStopJob?.cancel()
-    audioStopJob = null
-  }
-
-  private fun cancelPendingGameAudioStop() {
-    gameAudioStopJob?.cancel()
-    gameAudioStopJob = null
-  }
-
-  private fun muteAudioAndStopLater() {
-    val engine = audio ?: return
-    cancelPendingAudioStop()
-    engine.setMuted(true)
-    audioStopJob = viewModelScope.launch(Dispatchers.Default) {
-      delay(700)
-      if (audio === engine) {
-        engine.stop()
-        audio = null
-      }
+    if (fadeIn) {
+      audio?.beginFadeIn()
+      gameAudio?.beginFadeIn()
     }
   }
 
-  private fun muteGameAudioAndStopLater() {
-    val engine = gameAudio ?: return
-    cancelPendingGameAudioStop()
-    engine.setMuted(true)
-    gameAudioStopJob = viewModelScope.launch(Dispatchers.Default) {
-      delay(700)
-      if (gameAudio === engine) {
-        engine.stop()
-        gameAudio = null
-      }
-    }
+  private fun shutdownAudioEngines() {
+    audio?.setMuted(true)
+    gameAudio?.setMuted(true)
+    audio?.stop()
+    gameAudio?.stop()
+    audio = null
+    gameAudio = null
   }
 
   private fun syncFeedbackAudioState(fadeIn: Boolean = false) {
     val shouldNoiseRun = shouldNoiseAudioBeAudible()
     val shouldGameRun = shouldGameAudioBeAudible()
 
-    if (shouldNoiseRun) {
-      startAudioEngineIfNeeded()
-      cancelPendingAudioStop()
-      if (fadeIn) audio?.beginFadeIn()
-      audio?.setMuted(false)
-    } else {
-      audio?.setMuted(true)
-      muteAudioAndStopLater()
+    if (!_ui.value.audioEnabled || !_ui.value.sessionRunning) {
+      shutdownAudioEngines()
+      _ui.update {
+        it.copy(
+          audioRunning = false,
+          audioMuted = true,
+          gameAudioState = it.gameAudioState.copy(muted = true),
+          gameHudState = it.gameHudState.copy(
+            inputEnabled = shouldEnableGameInput(it.selectedGameId),
+            inputHint = gameInputHint(it.selectedGameId, it.gameRunning),
+          ),
+        )
+      }
+      return
     }
 
-    if (shouldGameRun) {
-      startGameAudioEngineIfNeeded()
-      cancelPendingGameAudioStop()
-      if (fadeIn) gameAudio?.beginFadeIn()
-      gameAudio?.update(_ui.value.selectedGameId, _ui.value.gameAudioState)
-      gameAudio?.setMuted(false)
-    } else {
-      gameAudio?.setMuted(true)
-      muteGameAudioAndStopLater()
-    }
+    ensureSessionAudioEngines(fadeIn = fadeIn)
+    audio?.setMuted(!shouldNoiseRun)
+    gameAudio?.update(_ui.value.selectedGameId, _ui.value.gameAudioState)
+    gameAudio?.setMuted(!shouldGameRun)
 
     _ui.update {
       it.copy(
-        audioRunning = it.audioEnabled && (audio != null || gameAudio != null),
+        audioRunning = shouldNoiseRun || shouldGameRun,
         audioMuted = !(shouldNoiseRun || shouldGameRun),
         gameAudioState = it.gameAudioState.copy(muted = !shouldGameRun),
         gameHudState = it.gameHudState.copy(
@@ -1161,17 +1137,37 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   private fun refreshRawPreview() {
     val setting = _ui.value.plotSettings.getValue(PlotType.RAW)
-    val sampleCount = (setting.windowSeconds * rawSampleRateHz).coerceIn(64, rawSampleRateHz * 20)
-    val values = eegProcessor.rawPreview(sampleCount)
-    _ui.update { it.copy(rawPreview = values) }
+    val maxOffset = eegProcessor.maxRawHistoryOffsetSeconds(setting.windowSeconds)
+    val clampedOffset = _ui.value.rawPlotOffsetSeconds.coerceIn(0, maxOffset)
+    val values = if (clampedOffset == 0) {
+      val sampleCount = (setting.windowSeconds * rawSampleRateHz).coerceIn(64, rawSampleRateHz * 20)
+      eegProcessor.rawPreview(sampleCount)
+    } else {
+      val historyRate = eegProcessor.rawHistoryRateHz()
+      val sampleCount = (setting.windowSeconds * historyRate).coerceAtLeast(24)
+      eegProcessor.rawHistory(sampleCount, clampedOffset * historyRate)
+    }
+    _ui.update {
+      it.copy(
+        rawPreview = values,
+        rawPlotOffsetSeconds = clampedOffset,
+      )
+    }
   }
 
   private fun refreshMetricPlotSeries() {
     val windowSeconds = _ui.value.plotSettings.getValue(PlotType.MEDITATION_PROXY).windowSeconds
+    val maxOffset = _ui.value.visibleMetrics.maxOfOrNull { metricHistory.maxOffsetSeconds(it, windowSeconds) } ?: 0
+    val clampedOffset = _ui.value.metricPlotOffsetSeconds.coerceIn(0, maxOffset)
     val series = _ui.value.visibleMetrics.associateWith { type ->
-      convertSeriesForDisplay(type, metricHistory.series(type, windowSeconds))
+      convertSeriesForDisplay(type, metricHistory.series(type, windowSeconds, clampedOffset))
     }
-    _ui.update { it.copy(metricPlotSeries = series) }
+    _ui.update {
+      it.copy(
+        metricPlotSeries = series,
+        metricPlotOffsetSeconds = clampedOffset,
+      )
+    }
   }
 
   private fun convertSeriesForDisplay(type: PlotType, values: List<Float>): List<Float> {
@@ -1244,5 +1240,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       ArtefactPrompt.FROWN -> ctx.getString(R.string.artifact_prompt_frown)
       ArtefactPrompt.RELAX -> ctx.getString(R.string.artifact_prompt_relax)
     }
+  }
+
+  private fun canPanPlots(): Boolean {
+    return !_ui.value.sessionRunning || _ui.value.sessionPaused
+  }
+
+  override fun onCleared() {
+    super.onCleared()
+    sessionJob?.cancel()
+    gameLoopJob?.cancel()
+    shutdownAudioEngines()
+    client?.close()
+    client = null
   }
 }

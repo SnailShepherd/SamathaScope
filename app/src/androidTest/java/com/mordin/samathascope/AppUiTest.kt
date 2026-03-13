@@ -32,7 +32,7 @@ class AppUiTest {
     composeRule.onNodeWithText("Dashboard").performClick()
     composeRule.onNodeWithText("Raw EEG").assertExists()
     composeRule.onNodeWithText("Metric explorer").assertExists()
-    composeRule.onNodeWithText("Feedback source: Meditation Proxy").assertExists()
+    composeRule.onNodeWithText("Session feedback source").assertExists()
   }
 
   @Test

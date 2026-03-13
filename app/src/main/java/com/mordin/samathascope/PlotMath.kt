@@ -7,9 +7,16 @@ data class PlotPoint(
 
 object PlotMath {
   fun <T> takeFixedWindow(values: List<T>, maxPoints: Int): List<T> {
-    if (maxPoints <= 0) return emptyList()
-    if (values.size <= maxPoints) return values
-    return values.takeLast(maxPoints)
+    return takeWindow(values = values, maxPoints = maxPoints, offsetPoints = 0)
+  }
+
+  fun <T> takeWindow(values: List<T>, maxPoints: Int, offsetPoints: Int): List<T> {
+    if (maxPoints <= 0 || values.isEmpty()) return emptyList()
+    val safeOffset = offsetPoints.coerceAtLeast(0)
+    val endExclusive = (values.size - safeOffset).coerceAtLeast(0)
+    if (endExclusive <= 0) return emptyList()
+    val startInclusive = (endExclusive - maxPoints).coerceAtLeast(0)
+    return values.subList(startInclusive, endExclusive)
   }
 
   fun toPlotPoints(

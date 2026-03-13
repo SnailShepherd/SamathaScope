@@ -6,28 +6,45 @@ import org.junit.Test
 class GameControllersTest {
 
   @Test
-  fun skyTower_placesBlockAfterTap() {
+  fun skyTower_carrierWaitsForTapBeforeRelease() {
     val controller = SkyTowerController()
     var state = controller.initialState()
-    val signals = GameSignalSnapshot(
-      stability = 0.8f,
-      drift = 0.1f,
-      noise = 0.05f,
-      fatigue = 0.1f,
-      precision = 0.8f,
-      correctionPulse = 0.6f,
-    )
+    val startY = state.carrier.y
 
-    repeat(24) { index ->
-      val events = if (index % 3 == 0) listOf(GameEvent.Tap) else emptyList()
-      state = controller.step(state, dtSeconds = 0.1f, signals = signals, events = events)
+    repeat(20) {
+      state = controller.step(
+        state = state,
+        dtSeconds = 0.1f,
+        signals = GameSignalSnapshot(stability = 0.8f, drift = 0.1f, noise = 0.05f, precision = 0.7f),
+        events = emptyList(),
+      )
     }
 
-    assertThat(state.placements).isGreaterThan(0)
+    assertThat(state.activeBodyId).isNull()
+    assertThat(state.carrier.visible).isTrue()
+    assertThat(state.carrier.y).isEqualTo(startY)
+    assertThat(state.placements).isEqualTo(0)
   }
 
   @Test
-  fun inkGarden_correctionPulseRaisesRepairGlow() {
+  fun skyTower_oneTapCreatesSingleReleasedBlock() {
+    val controller = SkyTowerController()
+    var state = controller.initialState()
+
+    state = controller.step(
+      state = state,
+      dtSeconds = 0.1f,
+      signals = GameSignalSnapshot(stability = 0.7f, drift = 0.2f, noise = 0.05f, precision = 0.8f),
+      events = listOf(GameEvent.Tap, GameEvent.Tap),
+    )
+
+    assertThat(state.activeBodyId).isNotNull()
+    assertThat(state.carrier.visible).isFalse()
+    assertThat(state.bodies.size).isEqualTo(2)
+  }
+
+  @Test
+  fun inkGarden_correctionPulseRaisesBloom() {
     val controller = InkGardenController()
     val state = controller.initialState()
 
@@ -38,15 +55,15 @@ class GameControllersTest {
       events = emptyList(),
     )
 
-    assertThat(next.repairGlow).isGreaterThan(state.repairGlow)
+    assertThat(next.bloom).isGreaterThan(state.bloom)
   }
 
   @Test
-  fun inkGarden_generatesVisibleInkSegments() {
+  fun inkGarden_accumulatesPigmentAcrossCells() {
     val controller = InkGardenController()
     var state = controller.initialState()
 
-    repeat(12) {
+    repeat(14) {
       state = controller.step(
         state = state,
         dtSeconds = 0.2f,
@@ -55,7 +72,7 @@ class GameControllersTest {
       )
     }
 
-    assertThat(state.segments).isNotEmpty()
+    assertThat(state.cells.count { it.pigment > 0.05f }).isGreaterThan(0)
   }
 
   @Test

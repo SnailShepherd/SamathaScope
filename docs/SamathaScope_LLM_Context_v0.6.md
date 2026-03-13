@@ -5,13 +5,11 @@
 - Compose compiler: via `org.jetbrains.kotlin.plugin.compose` (version 2.3.10)
 - Compose BOM: 2026.02.01
 
-If Android Studio suggests an AGP upgrade, the project is intended to stay on AGP 8.13.x unless the whole toolchain is moved together.
-
 ---
-# SamathaScope - LLM Context Pack (v0.5)
+# SamathaScope - LLM Context Pack (v0.6)
 
 Use this file as the primary context when answering questions about the SamathaScope Android project.
-It describes the current frontal-state classifier, dashboard-first UX, and calibration flow. It does not describe the retired RAI/Samatha-score design.
+It describes the current frontal-state classifier, dashboard/source UX, plot model, and multi-game runtime.
 
 ---
 
@@ -29,34 +27,38 @@ Personal neurofeedback for NeuroSky MindWave Mobile 2: reward relaxed, alert fro
 - Work within the limits of one dry frontal electrode at FP1 with ear reference.
 - Do not claim whole-brain state, connectivity, source localisation, or meditative attainment.
 - Keep the Bluetooth/session/recording architecture intact unless a small refactor is needed.
-- Shared feedback source now drives both audio and game.
+- Dashboard source selection only affects dashboard audio. Games use fixed multi-channel mappings.
 
 ---
 
 ## 2) Files that matter most
 
 - `MainViewModel.kt`
-  - session lifecycle, calibration phases, optional artefact capture, smoothing, plotting history, shared audio/game driving
+  - session lifecycle, calibration phases, optional artefact capture, smoothing, plotting history, dashboard source selection, audio arbitration
 - `App.kt`
   - dashboard/settings/game/learn UI wiring
+- `GameDomain.kt`
+  - per-game runtime state and controller logic
+- `GameUi.kt`
+  - Compose rendering for `Sky Tower`, `Ink Garden`, `Fire Keeper`, and `Scriptorium`
 - `EegProcessor.kt`
-  - 8-second windowing, Welch PSD, feature extraction, raw preview
-- `CalibrationManager.kt`
-  - robust clean baselines plus separate artefact-capture profiling
+  - 8-second windowing, Welch PSD, feature extraction, raw preview, decimated raw history
 - `ScoreModel.kt`
   - quality gate, feature z-scores, drowsiness-first classifier, meditation proxy
 - `MetricGlossary.kt`
-  - plain-language explanations and abbreviation decoding for in-app metrics
+  - plain-language metric explanations, pretty formulas, and term breakdowns
 - `MetricHistory.kt`
   - fixed-size 1 Hz history for the normalized metric explorer
 - `SessionRecorder.kt`
-  - raw + features recording with classifier and artefact terms
+  - raw + features recording with classifier, dashboard source, and mapped game channels
 - `NoiseAudioEngine.kt`
-  - white-noise reward plus crackle overlay, fade-in/fade-out behavior
+  - dashboard reward bed with no crackle overlay
+- `GameSoundEngine.kt`
+  - scene-specific procedural audio
 
 ---
 
-## 3) Current UX model (v0.5)
+## 3) Current UX model (v0.6)
 
 Tabs:
 - `Dashboard`
@@ -67,78 +69,79 @@ Tabs:
 Dashboard order:
 1. headset card
 2. session card
-3. always-on raw EEG strip
+3. raw EEG strip
 4. multi-line metric explorer
 5. diagnostics
 
 Interaction model:
-- tap a metric chip to add/remove a line
-- hold an eligible metric chip to set the shared feedback source
-- raw EEG is always visible and is not part of the metric chip selector
+- source selection moved to the `Session` card dropdown
+- allowed source metrics:
+  - `MeditationProxy`
+  - `Settledness`
+  - `Alertness`
+- metric explorer chips:
+  - tap toggles line visibility
+  - long-press focuses the explainer
+- paused or stopped raw and metric plots can be dragged to older history
+- a compact `Latest` control returns the plot to live-follow mode
 
 Settings contains:
 - audio enable/disable
 - invert reward
-- crackle controls
 - gamma and base-noise range
 - metric-history window
 - recording toggle
 - optional 50 Hz notch toggle
 
 Game:
-- lantern scene
-- compact HUD
-- shared feedback-source selector synced with dashboard
+- scene picker
+- explicit `Start` / `Restart`
+- fixed EEG mappings
+- four scenes:
+  - `Sky Tower`
+  - `Ink Garden`
+  - `Fire Keeper`
+  - `Scriptorium`
 
 Learn:
 - calibration explanation
 - optional artefact-capture explanation
-- metric glossary with formulas and caveats
+- metric glossary with prettier formulas plus plain-language TAR/TBR/ABR/Entropy term notes
 
 ---
 
 ## 4) Signal processing pipeline
 
-Raw sample stream (512 Hz) -> ring buffer -> every 1 second:
+Raw sample stream (`512 Hz`) -> ring buffer -> every `1 s`:
 
-1. Take the last 4096 raw samples (8 seconds).
+1. Take the last `4096` raw samples (`8 s`).
 2. Remove DC offset by mean subtraction.
-3. Compute Welch PSD with 2-second segments and 50 percent overlap.
+3. Compute Welch PSD with `2 s` segments and `50%` overlap.
 4. Apply two frequency branches:
-   - main analysis branch: optional 50 Hz notch, then 1-35 Hz features
-   - HF/diagnostic branch: optional 50 Hz notch, used for 20-40 Hz and line-noise diagnostics
+   - main analysis branch: optional `50 Hz` notch, then `1-35 Hz` features
+   - HF/diagnostic branch: optional `50 Hz` notch, used for `20-40 Hz` and line-noise diagnostics
 5. Extract band powers and classifier features.
 
 Bands:
-- theta: 4-7 Hz
-- alpha: 8-12 Hz
-- beta: 13-30 Hz
-- hf: 20-40 Hz
-- entropy range: 4-30 Hz
+- theta: `4-7 Hz`
+- alpha: `8-12 Hz`
+- beta: `13-30 Hz`
+- hf: `20-40 Hz`
 
 Feature outputs:
 - absolute powers: `P_theta`, `P_alpha`, `P_beta`, `P_hf`, `P_4_13`, `P_4_30`
 - log powers: `ln(P + eps)`
-- relative powers
-- `TBR = ln((P_theta + eps)/(P_beta + eps))`
-- `TAR = ln((P_theta + eps)/(P_alpha + eps))`
-- `ABR = ln((P_alpha + eps)/(P_beta + eps))`
+- `TBR`
+- `TAR`
+- `ABR`
 - theta peak frequency
 - alpha peak frequency
-- spectral entropy over 4-30 Hz
-- `EMG = ln((P_20_40 + eps)/(P_4_13 + eps))`
-- blink/transient rate from robust outlier peaks in raw data
+- spectral entropy over `4-30 Hz`
+- `EMG`
+- blink/transient rate
 - clip fraction
-- line-noise ratio near 50 Hz
+- line-noise ratio near `50 Hz`
 - max packet gap / stall statistic
-
-Abbreviations:
-- `MP`: Meditation Proxy
-- `QC`: Quality Confidence
-- `TBR`: theta/beta ratio
-- `TAR`: theta/alpha ratio
-- `ABR`: alpha/beta ratio
-- `EMG`: high-frequency muscle contamination proxy
 
 ---
 
@@ -146,9 +149,9 @@ Abbreviations:
 
 ### 5.1 Clean calibration
 
-The main calibration remains 60 seconds:
-- first 30 seconds: eyes open, sit still
-- next 30 seconds: face relaxed, eyes closed
+Main calibration lasts `60 s`:
+- first `30 s`: eyes open, sit still
+- next `30 s`: face relaxed, eyes closed
 
 It stores robust baseline stats for:
 - `logBeta`
@@ -166,12 +169,12 @@ with z clamped to `[-4, 4]`.
 
 Adaptive baselines:
 - only clean windows are added
-- a rolling 10-minute clean deque is maintained
+- a rolling `10 min` clean deque is maintained
 - adaptive recalibration recomputes robust stats from that deque only
 
 ### 5.2 Optional artefact calibration
 
-After the clean baseline, the user may run a separate 25-second capture:
+After the clean baseline, the user may run a separate `25 s` capture:
 - look left/right
 - look up/down
 - clench jaw
@@ -182,8 +185,6 @@ This capture:
 - does **not** enter the clean classifier baseline
 - does personalize blink/transient and EMG-related normalizations
 - is stored as a separate `ArtefactCalibrationProfile`
-
-If fewer than 20 clean windows are available at baseline timeout, the system backfills with the least-contaminated windows so the session can still start.
 
 ---
 
@@ -210,15 +211,13 @@ ArtefactScore = 0.30*contact + 0.25*emg + 0.20*blink + 0.15*clip + 0.10*stall
 QualityConfidence = 1 - ArtefactScore
 ```
 
-Hard contamination gate to `SIGNAL_CONTAMINATED` if any of:
+Hard contamination gate:
 - `poorSignal > 25`
 - `clipFraction >= 0.01`
 - `maxGapMs >= 150`
 - `blinkRateHz >= 0.75`
 - `hfRatio >= 0.35`
 - `ArtefactScore > 0.45`
-
-Line noise is retained as a diagnostic feature but excluded from the total artefact score.
 
 ### 6.2 Stage 2: drowsiness-first classifier
 
@@ -238,12 +237,6 @@ Decision rule:
 - else choose argmax of `M`, `F`, `W` if top score `> 0.55`
 - otherwise -> `UNCERTAIN`
 
-Interpretation:
-- `SETTLED`: relaxed and alert, not merely theta-heavy
-- `EFFORTFUL_FOCUS`: active control or re-focusing
-- `MIND_WANDERING`: reduced control while still awake
-- `DROWSY`: sleepy slowing, not meditation reward
-
 Continuous dimensions:
 ```text
 Alertness = 1 - D
@@ -254,83 +247,66 @@ MeditationProxy = Settledness * Alertness * QualityConfidence
 
 ---
 
-## 7) Smoothing and display rules
+## 7) Game mappings
 
-Base EMA:
-```text
-smoothed = 0.3*new + 0.7*old
-```
+Dashboard audio source selection does **not** change game mappings.
 
-Applied to:
-- state probabilities
-- alertness, control, settledness
-- artefact score and quality confidence
-- meditation proxy / reward value
+Games consume:
+- `stability = Settledness * QualityConfidence`
+- `drift = MindWandering * QualityConfidence`
+- `noise = ArtefactScore`
+- `fatigue = slow displayed-drowsy gate`
+- `precision = Control * QualityConfidence` (`Sky Tower` only)
+- `correctionPulse = transient from EffortfulFocus rise`
 
-Drowsiness display:
-- raw drowsiness evidence is additionally smoothed with `alpha = 0.15`
-- if a clean window is strongly settled and entropy is not suppressed, displayed drowsiness is capped at `0.45`
+Scene intentions:
 
-Displayed discrete state:
-- normal state switching still uses the hold smoother
-- `DROWSY` is stricter:
-  - 5 consecutive clean drowsy wins
-  - or one clean drowsy score above `0.80`
+- `Sky Tower`
+  - carrier block sweeps left/right
+  - one tap releases one block
+  - next carrier appears only after the released block settles or fails
+- `Ink Garden`
+  - low-resolution watercolor field
+  - pigment spreads, pools, feathers, and splatters over wet paper
+- `Fire Keeper`
+  - passive flame, ember, and smoke scene
+- `Scriptorium`
+  - passive self-writing manuscript
 
 ---
 
-## 8) Audio, game, and feedback source
+## 8) Audio model
 
-Default reward metric:
-```text
-MeditationProxy = Settledness * Alertness * QualityConfidence
-```
+Dashboard reward audio:
+- white-noise bed only
+- no crackle overlay
+
+Audio lifecycle:
+- keep dashboard and game engines alive during an active session
+- mute/unmute them for tab crossfades instead of recreating them
+- pause silences both without tearing them down
+- stop, disconnect, audio-off, and `onCleared` hard-stop both engines
 
 Behavioral rule:
 - drowsy or contaminated windows fade reward down
 - the system should never reward quiet sleep as if it were good meditation
-
-Selectable shared feedback metrics:
-- `MeditationProxy`
-- `Settledness`
-- `Control`
-- `Alertness`
-- `QualityConfidence`
-- `EffortfulFocusScore`
-
-Plot-only metrics:
-- `DrowsyScore`
-- `ArtefactScore`
-- `MindWanderingScore`
-- `eSense Meditation`
-- `eSense Attention`
-
-Audio behavior:
-- can be fully disabled
-- fades out on stop, disconnect, or audio-off
-- crackle remains the artefact channel
 
 ---
 
 ## 9) Plotting and recording
 
 Plot model:
-- raw EEG strip always visible, fixed 5-second window
-- metric explorer normalized to `0..100`
-- up to 4 simultaneous lines
-- default visible metrics:
-  - `MeditationProxy`
-  - `Alertness`
-  - `DrowsyScore`
-  - `ArtefactScore`
-
-Metric history:
-- 1 point per second
-- default metric plot window: 300 seconds
+- raw EEG strip always visible
+- normalized metric explorer uses `0..100`
+- all remaining explorer metrics can be shown at once
+- stable color mapping per `PlotType`
+- thicker lines plus legend
+- paused/stopped plots are pannable
+- raw EEG keeps a separate decimated history buffer for older browsing
 
 Recording output:
 - `raw.raw16le` - signed int16 little-endian raw stream
-- `features.csv` - timestamps, raw feature values, z-scored features, artefact components, artefact-profile terms, drowsiness evidence terms, raw and smoothed probabilities, raw/displayed state labels, and final feedback values sent to audio/game
+- `features.csv` - timestamps, raw feature values, z-scored features, artefact components, drowsiness evidence terms, probabilities, raw/displayed labels, chosen dashboard source, selected game id, mapped game channels, and compact game summary
 - `meta.txt` - session metadata
 
 ---

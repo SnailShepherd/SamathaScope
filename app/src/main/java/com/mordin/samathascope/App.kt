@@ -11,6 +11,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -26,6 +27,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -52,6 +55,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -60,22 +64,32 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import java.util.Locale
 import kotlin.math.roundToInt
 
-private val metricPalette = listOf(
-  Color(0xFF0B8F94),
-  Color(0xFFE08A1E),
-  Color(0xFF4F6BED),
-  Color(0xFF4E9F3D),
-  Color(0xFFC15F7A),
-  Color(0xFF7A6FF0),
-)
+private fun metricColorFor(type: PlotType): Color {
+  return when (type) {
+    PlotType.MEDITATION_PROXY -> Color(0xFF0B8F94)
+    PlotType.SETTLEDNESS -> Color(0xFF4E9F3D)
+    PlotType.CONTROL -> Color(0xFFB56A00)
+    PlotType.ALERTNESS -> Color(0xFFE08A1E)
+    PlotType.DROWSY_SCORE -> Color(0xFF6E6A8A)
+    PlotType.ARTEFACT_SCORE -> Color(0xFFC15F7A)
+    PlotType.QUALITY_CONFIDENCE -> Color(0xFF568CA7)
+    PlotType.EFFORTFUL_FOCUS_SCORE -> Color(0xFF7A6FF0)
+    PlotType.MIND_WANDERING_SCORE -> Color(0xFF8D4CA8)
+    PlotType.ESENSE_MEDITATION -> Color(0xFF4F6BED)
+    PlotType.ESENSE_ATTENTION -> Color(0xFF1F7C96)
+    PlotType.RAW -> Color(0xFF0B8F94)
+  }
+}
 
 @Composable
 fun App(vm: MainViewModel) {
@@ -137,9 +151,13 @@ private fun MainScreen(vm: MainViewModel) {
           onStartSession = vm::startSession,
           onTogglePause = vm::togglePause,
           onStopSession = vm::stopSession,
+          onSetFeedbackMetric = vm::setFeedbackMetric,
           onToggleMetric = vm::toggleVisibleMetric,
           onFocusMetricInfo = vm::focusMetricInfo,
-          onSetFeedbackMetric = vm::setFeedbackMetric,
+          onPanRawPlot = vm::panRawPlotBy,
+          onResetRawPlot = vm::resetRawPlotToLatest,
+          onPanMetricPlot = vm::panMetricPlotBy,
+          onResetMetricPlot = vm::resetMetricPlotToLatest,
           onStartArtefactCalibration = vm::startArtefactCalibration,
           onLaterArtefactCalibration = vm::dismissArtefactCalibrationOffer,
           onSkipArtefactCalibration = vm::skipArtefactCalibration,
@@ -149,11 +167,9 @@ private fun MainScreen(vm: MainViewModel) {
           ui = ui,
           onAudioEnabledChange = vm::setAudioEnabled,
           onInvertRewardChange = vm::setInvertReward,
-          onCrackleEnabledChange = vm::setCrackleEnabled,
           onGammaChange = vm::setGamma,
           onGMinDbChange = vm::setGMinDb,
           onGMaxDbChange = vm::setGMaxDb,
-          onCrackleIntensityChange = vm::setCrackleIntensity,
           onTestBeep = vm::testBeep,
           onMetricWindowChange = vm::setMetricWindowSeconds,
           onRecordingChange = vm::setRecordingEnabled,
@@ -193,9 +209,13 @@ private fun DashboardTab(
   onStartSession: () -> Unit,
   onTogglePause: () -> Unit,
   onStopSession: () -> Unit,
+  onSetFeedbackMetric: (PlotType) -> Unit,
   onToggleMetric: (PlotType) -> Unit,
   onFocusMetricInfo: (PlotType) -> Unit,
-  onSetFeedbackMetric: (PlotType) -> Unit,
+  onPanRawPlot: (Int) -> Unit,
+  onResetRawPlot: () -> Unit,
+  onPanMetricPlot: (Int) -> Unit,
+  onResetMetricPlot: () -> Unit,
   onStartArtefactCalibration: () -> Unit,
   onLaterArtefactCalibration: () -> Unit,
   onSkipArtefactCalibration: () -> Unit,
@@ -223,16 +243,22 @@ private fun DashboardTab(
             onStartSession = onStartSession,
             onTogglePause = onTogglePause,
             onStopSession = onStopSession,
+            onSetFeedbackMetric = onSetFeedbackMetric,
             onStartArtefactCalibration = onStartArtefactCalibration,
             onLaterArtefactCalibration = onLaterArtefactCalibration,
             onSkipArtefactCalibration = onSkipArtefactCalibration,
           )
-          RawEegSection(ui)
+          RawEegSection(
+            ui = ui,
+            onPan = onPanRawPlot,
+            onResetToLatest = onResetRawPlot,
+          )
           MetricExplorerSection(
             ui = ui,
             onToggleMetric = onToggleMetric,
             onFocusMetricInfo = onFocusMetricInfo,
-            onSetFeedbackMetric = onSetFeedbackMetric,
+            onPanPlot = onPanMetricPlot,
+            onResetToLatest = onResetMetricPlot,
           )
         }
         Column(modifier = Modifier.weight(0.95f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -253,16 +279,22 @@ private fun DashboardTab(
           onStartSession = onStartSession,
           onTogglePause = onTogglePause,
           onStopSession = onStopSession,
+          onSetFeedbackMetric = onSetFeedbackMetric,
           onStartArtefactCalibration = onStartArtefactCalibration,
           onLaterArtefactCalibration = onLaterArtefactCalibration,
           onSkipArtefactCalibration = onSkipArtefactCalibration,
         )
-        RawEegSection(ui)
+        RawEegSection(
+          ui = ui,
+          onPan = onPanRawPlot,
+          onResetToLatest = onResetRawPlot,
+        )
         MetricExplorerSection(
           ui = ui,
           onToggleMetric = onToggleMetric,
           onFocusMetricInfo = onFocusMetricInfo,
-          onSetFeedbackMetric = onSetFeedbackMetric,
+          onPanPlot = onPanMetricPlot,
+          onResetToLatest = onResetMetricPlot,
         )
         DiagnosticsSection(ui)
       }
@@ -328,6 +360,7 @@ private fun SessionSection(
   onStartSession: () -> Unit,
   onTogglePause: () -> Unit,
   onStopSession: () -> Unit,
+  onSetFeedbackMetric: (PlotType) -> Unit,
   onStartArtefactCalibration: () -> Unit,
   onLaterArtefactCalibration: () -> Unit,
   onSkipArtefactCalibration: () -> Unit,
@@ -360,6 +393,15 @@ private fun SessionSection(
     }
 
     Spacer(Modifier.height(8.dp))
+    Text(stringResource(R.string.section_feedback_source), fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+    Spacer(Modifier.height(4.dp))
+    FeedbackSourceDropdown(
+      selected = ui.feedbackMetric,
+      options = MetricGlossary.feedbackSourceMetrics(),
+      onSelect = onSetFeedbackMetric,
+    )
+
+    Spacer(Modifier.height(8.dp))
     if (ui.calibrating) {
       Text(stringResource(R.string.calibrating_countdown, ui.calibrationRemainingSec), fontWeight = FontWeight.SemiBold)
       LinearProgressIndicator(
@@ -386,16 +428,33 @@ private fun SessionSection(
 }
 
 @Composable
-private fun RawEegSection(ui: UiState) {
+private fun RawEegSection(
+  ui: UiState,
+  onPan: (Int) -> Unit,
+  onResetToLatest: () -> Unit,
+) {
   val settings = ui.plotSettings.getValue(PlotType.RAW)
   Panel {
-    Text(stringResource(R.string.section_raw_eeg), fontWeight = FontWeight.SemiBold)
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Text(stringResource(R.string.section_raw_eeg), fontWeight = FontWeight.SemiBold)
+      if (ui.rawPlotOffsetSeconds > 0) {
+        TextButton(onClick = onResetToLatest) {
+          Text("Latest")
+        }
+      }
+    }
     Spacer(Modifier.height(6.dp))
     WaveformPlot(
       samples = ui.rawPreview,
       yMin = settings.yMin,
       yMax = settings.yMax,
       heightDp = 120.dp,
+      pannable = !ui.sessionRunning || ui.sessionPaused,
+      onPan = onPan,
     )
   }
 }
@@ -405,9 +464,12 @@ private fun MetricExplorerSection(
   ui: UiState,
   onToggleMetric: (PlotType) -> Unit,
   onFocusMetricInfo: (PlotType) -> Unit,
-  onSetFeedbackMetric: (PlotType) -> Unit,
+  onPanPlot: (Int) -> Unit,
+  onResetToLatest: () -> Unit,
 ) {
   val infoEntry = MetricGlossary.entryFor(ui.selectedMetricInfo)
+  val bringIntoViewRequester = remember { BringIntoViewRequester() }
+  val coroutineScope = rememberCoroutineScope()
 
   Panel {
     Row(
@@ -416,7 +478,11 @@ private fun MetricExplorerSection(
       verticalAlignment = Alignment.CenterVertically,
     ) {
       Text(stringResource(R.string.section_live_plot), fontWeight = FontWeight.SemiBold)
-      ValueText(stringResource(R.string.feedback_source_label, MetricGlossary.entryFor(ui.feedbackMetric).plainName))
+      if (ui.metricPlotOffsetSeconds > 0) {
+        TextButton(onClick = onResetToLatest) {
+          Text("Latest")
+        }
+      }
     }
     Text(stringResource(R.string.metric_explorer_hint), style = MaterialTheme.typography.bodySmall)
     Spacer(Modifier.height(6.dp))
@@ -424,24 +490,31 @@ private fun MetricExplorerSection(
     MetricChipRow(
       options = MetricGlossary.dashboardMetrics(),
       visibleMetrics = ui.visibleMetrics,
-      feedbackMetric = ui.feedbackMetric,
       onTap = {
         onToggleMetric(it)
         onFocusMetricInfo(it)
+        coroutineScope.launch { bringIntoViewRequester.bringIntoView() }
       },
       onLongPress = {
         onFocusMetricInfo(it)
-        if (MetricGlossary.entryFor(it).canBeFeedbackSource) {
-          onSetFeedbackMetric(it)
-        }
+        coroutineScope.launch { bringIntoViewRequester.bringIntoView() }
       },
     )
 
     Spacer(Modifier.height(10.dp))
-    MultiMetricPlot(series = ui.metricPlotSeries)
+    MultiMetricPlot(
+      series = ui.metricPlotSeries,
+      pannable = !ui.sessionRunning || ui.sessionPaused,
+      onPan = onPanPlot,
+    )
+    Spacer(Modifier.height(8.dp))
+    MetricLegendRow(ui.visibleMetrics.toList())
 
     Spacer(Modifier.height(8.dp))
-    MetricExplainer(entry = infoEntry)
+    MetricExplainer(
+      entry = infoEntry,
+      modifier = Modifier.bringIntoViewRequester(bringIntoViewRequester),
+    )
   }
 }
 
@@ -450,11 +523,9 @@ private fun SettingsTab(
   ui: UiState,
   onAudioEnabledChange: (Boolean) -> Unit,
   onInvertRewardChange: (Boolean) -> Unit,
-  onCrackleEnabledChange: (Boolean) -> Unit,
   onGammaChange: (Float) -> Unit,
   onGMinDbChange: (Int) -> Unit,
   onGMaxDbChange: (Int) -> Unit,
-  onCrackleIntensityChange: (Float) -> Unit,
   onTestBeep: () -> Unit,
   onMetricWindowChange: (Int) -> Unit,
   onRecordingChange: (Boolean) -> Unit,
@@ -479,12 +550,6 @@ private fun SettingsTab(
         label = stringResource(R.string.invert_reward),
         onCheckedChange = onInvertRewardChange,
       )
-      LabeledCheckbox(
-        checked = ui.crackleEnabled,
-        label = stringResource(R.string.crackle_overlay),
-        onCheckedChange = onCrackleEnabledChange,
-      )
-      Text(stringResource(R.string.crackle_helper), style = MaterialTheme.typography.bodySmall)
       Text(stringResource(R.string.gamma_value, ui.gamma), style = MaterialTheme.typography.bodySmall)
       Slider(value = ui.gamma, onValueChange = onGammaChange, valueRange = 0.6f..3.0f)
       Text(stringResource(R.string.base_noise_range, ui.gMinDb, ui.gMaxDb), style = MaterialTheme.typography.bodySmall)
@@ -498,8 +563,6 @@ private fun SettingsTab(
           Slider(value = ui.gMaxDb.toFloat(), onValueChange = { onGMaxDbChange(it.roundToInt()) }, valueRange = -30f..0f)
         }
       }
-      Text(stringResource(R.string.crackle_intensity, ui.crackleIntensity), style = MaterialTheme.typography.bodySmall)
-      Slider(value = ui.crackleIntensity, onValueChange = onCrackleIntensityChange, valueRange = 0f..1f)
       OutlinedButton(onClick = onTestBeep) {
         Text(stringResource(R.string.test_beep))
       }
@@ -719,7 +782,16 @@ private fun LearnTab() {
           append("\n\n")
           append(entry.longMeaning)
           append("\n\nFormula: ")
-          append(entry.formula)
+          append(entry.displayFormula)
+          if (entry.terms.isNotEmpty()) {
+            append("\n\nTerms:")
+            entry.terms.forEach { term ->
+              append("\n- ")
+              append(term.label)
+              append(": ")
+              append(term.meaning)
+            }
+          }
         }
       )
     }
@@ -883,7 +955,6 @@ private fun SignedValueRow(label: String, value: Float) {
 private fun MetricChipRow(
   options: List<PlotType>,
   visibleMetrics: Set<PlotType>,
-  feedbackMetric: PlotType,
   onTap: (PlotType) -> Unit,
   onLongPress: (PlotType) -> Unit,
 ) {
@@ -895,16 +966,15 @@ private fun MetricChipRow(
     options.forEach { option ->
       val entry = MetricGlossary.entryFor(option)
       val isVisible = visibleMetrics.contains(option)
-      val isSource = feedbackMetric == option
       Box(
         modifier = Modifier
           .border(
-            width = if (isSource) 2.dp else 1.dp,
-            color = if (isSource) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+            width = if (isVisible) 2.dp else 1.dp,
+            color = if (isVisible) metricColorFor(option) else MaterialTheme.colorScheme.outline,
             shape = RoundedCornerShape(20.dp),
           )
           .background(
-            color = if (isVisible) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+            color = if (isVisible) metricColorFor(option).copy(alpha = 0.12f) else MaterialTheme.colorScheme.surface,
             shape = RoundedCornerShape(20.dp),
           )
           .combinedClickable(
@@ -914,45 +984,90 @@ private fun MetricChipRow(
           .padding(horizontal = 12.dp, vertical = 8.dp)
       ) {
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-          Text(entry.plainName, style = MaterialTheme.typography.labelMedium)
-          if (isSource) {
-            Text(stringResource(R.string.metric_source_short), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+          Canvas(modifier = Modifier.width(10.dp).height(10.dp)) {
+            drawCircle(color = metricColorFor(option))
           }
+          Text(entry.plainName, style = MaterialTheme.typography.labelMedium)
         }
       }
     }
   }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun MetricSourceRow(
+private fun FeedbackSourceDropdown(
   options: List<PlotType>,
   selected: PlotType,
   onSelect: (PlotType) -> Unit,
 ) {
-  FlowRow(
-    modifier = Modifier.fillMaxWidth(),
-    horizontalArrangement = Arrangement.spacedBy(8.dp),
-    verticalArrangement = Arrangement.spacedBy(8.dp)
-  ) {
-    options.forEach { option ->
-      val isSelected = option == selected
-      OutlinedButton(
-        onClick = { onSelect(option) },
-        modifier = Modifier.height(40.dp),
-        border = BorderStroke(2.dp, if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline)
-      ) {
-        Text(MetricGlossary.entryFor(option).plainName)
+  var expanded by remember { mutableStateOf(false) }
+
+  Box(modifier = Modifier.fillMaxWidth()) {
+    OutlinedButton(
+      onClick = { expanded = true },
+      modifier = Modifier
+        .fillMaxWidth()
+        .height(40.dp),
+      border = BorderStroke(2.dp, metricColorFor(selected)),
+    ) {
+      Text(MetricGlossary.entryFor(selected).plainName)
+    }
+
+    DropdownMenu(
+      expanded = expanded,
+      onDismissRequest = { expanded = false },
+      modifier = Modifier.fillMaxWidth(),
+    ) {
+      options.forEach { option ->
+        DropdownMenuItem(
+          text = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+              Canvas(modifier = Modifier.width(10.dp).height(10.dp)) {
+                drawCircle(metricColorFor(option))
+              }
+              Text(MetricGlossary.entryFor(option).plainName)
+            }
+          },
+          onClick = {
+            onSelect(option)
+            expanded = false
+          }
+        )
       }
     }
   }
 }
 
 @Composable
-private fun MetricExplainer(entry: MetricGlossaryEntry) {
-  Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-    Text("${entry.plainName} (${entry.abbreviation})", fontWeight = FontWeight.SemiBold)
+private fun MetricLegendRow(options: List<PlotType>) {
+  FlowRow(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.spacedBy(10.dp),
+    verticalArrangement = Arrangement.spacedBy(6.dp),
+  ) {
+    options.forEach { option ->
+      Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Canvas(modifier = Modifier.width(10.dp).height(10.dp)) {
+          drawCircle(metricColorFor(option))
+        }
+        Text(MetricGlossary.entryFor(option).plainName, style = MaterialTheme.typography.labelSmall)
+      }
+    }
+  }
+}
+
+@Composable
+private fun MetricExplainer(
+  entry: MetricGlossaryEntry,
+  modifier: Modifier = Modifier,
+) {
+  Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+      Canvas(modifier = Modifier.width(12.dp).height(12.dp)) {
+        drawCircle(metricColorFor(entry.type))
+      }
+      Text("${entry.plainName} (${entry.abbreviation})", fontWeight = FontWeight.SemiBold)
+    }
     Text(entry.shortMeaning, style = MaterialTheme.typography.bodySmall)
     Text("What usually raises it: ${entry.drivers}", style = MaterialTheme.typography.bodySmall)
     Text(
@@ -963,7 +1078,10 @@ private fun MetricExplainer(entry: MetricGlossaryEntry) {
       },
       style = MaterialTheme.typography.bodySmall,
     )
-    Text(entry.formula, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace)
+    Text(entry.displayFormula, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace)
+    entry.terms.forEach { term ->
+      Text("${term.label}: ${term.meaning}", style = MaterialTheme.typography.bodySmall)
+    }
   }
 }
 
@@ -1046,6 +1164,8 @@ private fun WaveformPlot(
   yMin: Float,
   yMax: Float,
   heightDp: androidx.compose.ui.unit.Dp = 180.dp,
+  pannable: Boolean = false,
+  onPan: (Int) -> Unit = {},
 ) {
   if (samples.size < 8) return
 
@@ -1060,6 +1180,18 @@ private fun WaveformPlot(
       .height(heightDp)
       .background(colorScheme.surface)
       .border(1.dp, colorScheme.outline, RoundedCornerShape(4.dp))
+      .pointerInput(pannable) {
+        if (!pannable) return@pointerInput
+        var carry = 0f
+        detectHorizontalDragGestures { _, dragAmount ->
+          carry += dragAmount
+          val seconds = (-carry / 18f).toInt()
+          if (seconds != 0) {
+            onPan(seconds)
+            carry += seconds * 18f
+          }
+        }
+      }
       .padding(6.dp)
   ) {
     val w = size.width
@@ -1084,7 +1216,11 @@ private fun WaveformPlot(
 }
 
 @Composable
-private fun MultiMetricPlot(series: Map<PlotType, List<Float>>) {
+private fun MultiMetricPlot(
+  series: Map<PlotType, List<Float>>,
+  pannable: Boolean = false,
+  onPan: (Int) -> Unit = {},
+) {
   if (series.isEmpty()) return
 
   val colorScheme = MaterialTheme.colorScheme
@@ -1094,6 +1230,18 @@ private fun MultiMetricPlot(series: Map<PlotType, List<Float>>) {
       .height(220.dp)
       .background(colorScheme.surface)
       .border(1.dp, colorScheme.outline, RoundedCornerShape(4.dp))
+      .pointerInput(pannable) {
+        if (!pannable) return@pointerInput
+        var carry = 0f
+        detectHorizontalDragGestures { _, dragAmount ->
+          carry += dragAmount
+          val seconds = (-carry / 18f).toInt()
+          if (seconds != 0) {
+            onPan(seconds)
+            carry += seconds * 18f
+          }
+        }
+      }
       .padding(6.dp)
   ) {
     val w = size.width
@@ -1109,9 +1257,9 @@ private fun MultiMetricPlot(series: Map<PlotType, List<Float>>) {
       )
     }
 
-    series.entries.forEachIndexed { index, entry ->
+    series.entries.forEach { entry ->
       val values = entry.value
-      if (values.size < 2) return@forEachIndexed
+      if (values.size < 2) return@forEach
       val points = PlotMath.toPlotPoints(values, 0f, 100f, width = 1f, height = 1f)
       val path = Path()
       points.forEachIndexed { pointIndex, point ->
@@ -1121,8 +1269,8 @@ private fun MultiMetricPlot(series: Map<PlotType, List<Float>>) {
       }
       drawPath(
         path = path,
-        color = metricPalette[index % metricPalette.size],
-        style = Stroke(width = if (entry.key == PlotType.MEDITATION_PROXY) 2.8f else 2.1f),
+        color = metricColorFor(entry.key),
+        style = Stroke(width = if (entry.key == PlotType.MEDITATION_PROXY) 3.8f else 3.0f),
       )
     }
   }

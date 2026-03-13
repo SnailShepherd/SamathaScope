@@ -20,11 +20,19 @@ class MetricHistory(
     }
   }
 
-  fun series(type: PlotType, windowSeconds: Int): List<Float> {
+  fun series(type: PlotType, windowSeconds: Int, offsetSeconds: Int = 0): List<Float> {
     if (type == PlotType.RAW) return emptyList()
     val maxPoints = (windowSeconds * pointsPerSecond).coerceAtLeast(2)
+    val offsetPoints = (offsetSeconds * pointsPerSecond).coerceAtLeast(0)
     val source = sources[type] ?: return emptyList()
-    return PlotMath.takeFixedWindow(source, maxPoints)
+    return PlotMath.takeWindow(source, maxPoints, offsetPoints)
+  }
+
+  fun maxOffsetSeconds(type: PlotType, windowSeconds: Int): Int {
+    if (type == PlotType.RAW) return 0
+    val source = sources[type] ?: return 0
+    val maxPoints = (windowSeconds * pointsPerSecond).coerceAtLeast(2)
+    return ((source.size - maxPoints).coerceAtLeast(0) / pointsPerSecond).coerceAtLeast(0)
   }
 
   private fun push(list: ArrayList<Float>, value: Float) {

@@ -1,6 +1,6 @@
 <resources>
   <string name="app_name">SamathaScope</string>
-  <string name="app_title">SamathaScope v0.5</string>
+  <string name="app_title">SamathaScope v0.6</string>
   <string name="settings">Settings</string>
 
   <string name="tab_dashboard">Dashboard</string>
@@ -43,10 +43,8 @@
   <string name="raw_range_label">Window: %1$ds   Y range: %2$d to %3$d (raw units)</string>
 
   <string name="section_live_plot">Metric explorer</string>
-  <string name="metric_explorer_hint">Tap chips to add or remove up to four lines. Hold an eligible metric to make it the shared feedback source for audio and game.</string>
-  <string name="feedback_source_label">Feedback source: %1$s</string>
-  <string name="metric_source_short">Source</string>
-  <string name="metric_source_eligible">Eligible as the shared feedback source.</string>
+  <string name="metric_explorer_hint">Tap chips to show or hide lines. Hold a chip to focus its explanation below.</string>
+  <string name="metric_source_eligible">Eligible as a dashboard audio feedback source.</string>
   <string name="metric_source_plot_only">Plot-only metric for context and diagnostics.</string>
 
   <string name="section_diagnostics">Diagnostics</string>
@@ -68,19 +66,16 @@
   <string name="personalized_emg_label">Personalised EMG reference</string>
   <string name="esense_line">eSense Attention: %1$d   eSense Meditation: %2$d</string>
 
-  <string name="section_feedback_source">Shared feedback source</string>
+  <string name="section_feedback_source">Session feedback source</string>
 
   <string name="settings_audio_title">Audio</string>
   <string name="audio_enabled">Enable audio feedback</string>
   <string name="invert_reward">Invert reward (louder means better)</string>
-  <string name="crackle_overlay">Crackle overlay (independent)</string>
-  <string name="crackle_helper">Adds short crackling bursts from artefact score so contamination is audible separately from the base reward.</string>
   <string name="gamma_value">Sensitivity (gamma): %1$.2f</string>
   <string name="gamma_helper">Gamma controls response curve sensitivity: higher gamma is gentler near good states and more pronounced near poor states.</string>
   <string name="base_noise_range">Base noise range (dB): min %1$d  max %2$d</string>
   <string name="base_noise_min">Minimum (quiet)</string>
   <string name="base_noise_max">Maximum (loud)</string>
-  <string name="crackle_intensity">Crackle intensity: %1$.2f</string>
   <string name="test_beep">Test beep</string>
   <string name="audio_running">Audio running</string>
   <string name="audio_off">Audio off</string>
@@ -103,7 +98,7 @@
 
   <string name="plot_settings_title">Plot settings</string>
   <string name="settings_plot_title">Plots</string>
-  <string name="settings_plot_helper">The dashboard metric explorer uses one shared history window. Raw EEG stays visible above it with a fixed 5-second window.</string>
+  <string name="settings_plot_helper">The dashboard metric explorer uses one shared history window. Raw EEG stays visible above it, and paused or stopped plots can be dragged to older history.</string>
   <string name="plot_window_label">Window</string>
   <string name="seconds_value">%1$ds</string>
   <string name="plot_y_range">Y range: %1$d to %2$d</string>
@@ -147,9 +142,9 @@
   <string name="learn_artifact_calibration_title">Optional artefact calibration</string>
   <string name="learn_artifact_calibration_body">After the clean baseline, you can run a short 25-second artefact capture. It records eye movements, jaw clench, and forehead tension so blink and EMG thresholds can be personalised without contaminating the clean meditation baseline.</string>
   <string name="learn_score_title">Frontal-state feedback proxy</string>
-  <string name="learn_score_body">The live reward is a personalised frontal-state classifier built from 8-second raw EEG windows. It combines settledness, alertness, and signal quality instead of relying on a single alpha-heavy score.</string>
+  <string name="learn_score_body">The live reward is a personalised frontal-state classifier built from 8-second raw EEG windows. Dashboard audio uses the source chosen in the Session card, while the games use their own fixed multi-channel EEG mappings.</string>
   <string name="learn_metric_difference_title">Settled is not drowsy</string>
-  <string name="learn_metric_difference_body">Drowsiness is estimated first so the app does not confuse sleepy theta-heavy slowing with useful meditation feedback. A settled state here means relaxed and awake, not merely low-energy.</string>
+  <string name="learn_metric_difference_body">Drowsiness is estimated first so the app does not confuse sleepy theta-heavy slowing with useful meditation feedback. Its evidence combines TAR, TBR, entropy, and ABR, so a settled state here means relaxed and awake, not merely low-energy.</string>
   <string name="learn_caveat_title">Interpretation limits</string>
   <string name="learn_caveat_body">This is a non-medical training aid built around one dry frontal electrode at FP1 with an ear reference. It cannot infer whole-brain state, connectivity, source localisation, or meditative attainment.</string>
   <string name="learn_wellbeing_title">Wellbeing note</string>

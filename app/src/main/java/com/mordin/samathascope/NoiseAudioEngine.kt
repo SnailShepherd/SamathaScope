@@ -7,57 +7,32 @@ import kotlin.math.exp
 import kotlin.math.pow
 import kotlin.random.Random
 
-/**
- * White-noise neurofeedback audio engine (v0.1).
- *
- * Output:
- * - Stereo base white noise (gain driven by feedback value)
- * - Independent "crackle" overlay (intensity driven by artefact score A)
- *
- * Design choices (why this way):
- * - We use `USAGE_MEDIA` so the sound is controlled by the device media volume.
- *   (Using SONIFICATION can end up on a muted system stream on some phones.)
- * - We generate PCM 16-bit, because it is supported everywhere; float PCM can fail on some devices.
- * - Attack/Release smoothing prevents flutter when the EEG-derived score jitters.
- */
 class NoiseAudioEngine(
-  private val sampleRate: Int = 48000,
-  private val frameSize: Int = 480, // 10 ms
+  private val sampleRate: Int = 48_000,
+  private val frameSize: Int = 480,
 ) {
-
   private var track: AudioTrack? = null
   private var thread: Thread? = null
 
   @Volatile private var running = false
   @Volatile private var muted = true
 
-  // Target params (updated from UI thread)
   @Volatile private var targetFeedback: Float = 0f
-  @Volatile private var targetA: Float = 0f
   @Volatile private var invertReward: Boolean = false
   @Volatile private var gamma: Float = 1.6f
   @Volatile private var gMinDb: Int = -30
   @Volatile private var gMaxDb: Int = -3
-  @Volatile private var crackleEnabled: Boolean = true
-  @Volatile private var crackleIntensity: Float = 0.6f
 
-  // Debug (shown in UI)
   @Volatile var debugBaseDb: Float = -120f
     private set
 
-  // State
   private var baseAmp: Float = 0f
   private var fadeIn: Float = 0f
   private var fading = false
   private var masterAudibility: Float = 0f
 
-  // Crackle envelopes per channel
-  private var crackleEnvL = 0f
-  private var crackleEnvR = 0f
-
-  // time constants
-  private val attackMs = 300f   // louder quickly when you get worse
-  private val releaseMs = 1500f // quieter slowly when you improve
+  private val attackMs = 300f
+  private val releaseMs = 1500f
 
   fun start() {
     if (running) return
@@ -66,11 +41,11 @@ class NoiseAudioEngine(
     fadeIn = 0f
     fading = false
 
-    val minBuf = AudioTrack.getMinBufferSize(
+    val minBuffer = AudioTrack.getMinBufferSize(
       sampleRate,
       AudioFormat.CHANNEL_OUT_STEREO,
-      AudioFormat.ENCODING_PCM_16BIT
-    ).coerceAtLeast(frameSize * 2 * 2 * 4) // frames * channels * bytes * safety
+      AudioFormat.ENCODING_PCM_16BIT,
+    ).coerceAtLeast(frameSize * 2 * 2 * 4)
 
     track = AudioTrack.Builder()
       .setAudioAttributes(
@@ -87,13 +62,15 @@ class NoiseAudioEngine(
           .build()
       )
       .setTransferMode(AudioTrack.MODE_STREAM)
-      .setBufferSizeInBytes(minBuf)
+      .setBufferSizeInBytes(minBuffer)
       .build()
 
     track?.play()
-    track?.setVolume(1.0f)
-
-    thread = Thread { audioLoop() }.apply { isDaemon = true; start() }
+    track?.setVolume(1f)
+    thread = Thread { audioLoop() }.apply {
+      isDaemon = true
+      start()
+    }
   }
 
   fun stop() {
@@ -110,114 +87,72 @@ class NoiseAudioEngine(
     fadeIn = 0f
   }
 
-  fun setMuted(m: Boolean) {
-    muted = m
+  fun setMuted(value: Boolean) {
+    muted = value
   }
 
   fun update(
     feedbackValue: Float,
-    artefactA: Float,
     invertReward: Boolean,
     gamma: Float,
     gMinDb: Int,
     gMaxDb: Int,
-    crackleEnabled: Boolean,
-    crackleIntensity: Float
   ) {
-    this.targetFeedback = feedbackValue.coerceIn(0f, 1f)
-    this.targetA = artefactA.coerceIn(0f, 1f)
+    targetFeedback = feedbackValue.coerceIn(0f, 1f)
     this.invertReward = invertReward
     this.gamma = gamma.coerceIn(0.6f, 3.0f)
     this.gMinDb = gMinDb
     this.gMaxDb = gMaxDb
-    this.crackleEnabled = crackleEnabled
-    this.crackleIntensity = crackleIntensity.coerceIn(0f, 1f)
   }
 
   private fun audioLoop() {
-    val t = track ?: return
-    val buffer = ShortArray(frameSize * 2) // interleaved stereo
-
+    val track = track ?: return
+    val buffer = ShortArray(frameSize * 2)
     val dt = frameSize.toFloat() / sampleRate.toFloat()
 
     while (running) {
-      // Base gain target from the smoothed feedback value (0..1) → dB.
-      val s = targetFeedback
-      val mapped = if (!invertReward) (1f - s).coerceIn(0f, 1f) else s
+      val signal = targetFeedback
+      val mapped = if (!invertReward) (1f - signal).coerceIn(0f, 1f) else signal
       val shaped = mapped.pow(gamma)
-      val gDb = gMinDb + shaped * (gMaxDb - gMinDb)
-      debugBaseDb = gDb
+      val baseDb = gMinDb + shaped * (gMaxDb - gMinDb)
+      debugBaseDb = baseDb
 
-      val targetAmp = dbToAmp(gDb)
-
-      // Attack/release smoothing on amplitude
+      val targetAmp = dbToAmp(baseDb)
       val tau = if (targetAmp > baseAmp) attackMs / 1000f else releaseMs / 1000f
-      val a = 1f - exp(-dt / tau)
-      baseAmp += a * (targetAmp - baseAmp)
+      val smoothing = 1f - exp(-dt / tau)
+      baseAmp += smoothing * (targetAmp - baseAmp)
 
-      // Fade-in after calibration (2 s)
       if (fading) {
-        fadeIn += dt / 2.0f
-        if (fadeIn >= 1f) { fadeIn = 1f; fading = false }
+        fadeIn += dt / 0.8f
+        if (fadeIn >= 1f) {
+          fadeIn = 1f
+          fading = false
+        }
       }
 
       val masterTarget = if (muted) 0f else 1f
-      val masterTau = if (masterTarget < masterAudibility) 0.6f else 0.12f
+      val masterTau = if (masterTarget < masterAudibility) 0.45f else 0.12f
       val masterAlpha = 1f - exp(-dt / masterTau)
       masterAudibility += masterAlpha * (masterTarget - masterAudibility)
-      val master = masterAudibility * (if (fading) fadeIn else 1f)
+      val master = masterAudibility * if (fading) fadeIn else 1f
 
-      val A = targetA
-
-      // Crackle event rate: sparse when clean, busy when ugly.
-      val rMin = 0.3f
-      val rMax = 12.0f
-      val beta = 1.8f
-      val rate = rMin + (A.pow(beta)) * (rMax - rMin)
-
-      val p = rate / sampleRate.toFloat()
-
-      // Crackle gain.
-      val gMax = 0.7f * crackleIntensity
-      val eta = 1.2f
-      val crackAmp = (A.pow(eta)) * gMax
-
-      // Envelope decay: ~60 ms.
-      val envDecay = exp(-dt / 0.06f)
-
-      var idx = 0
-      for (i in 0 until frameSize) {
-        val nL = (Random.nextFloat() * 2f - 1f) * baseAmp * master
-        val nR = (Random.nextFloat() * 2f - 1f) * baseAmp * master
-
-        var cL = 0f
-        var cR = 0f
-        if (crackleEnabled && master > 0f) {
-          if (Random.nextFloat() < p) crackleEnvL = 1f
-          if (Random.nextFloat() < p) crackleEnvR = 1f
-
-          cL = (Random.nextFloat() * 2f - 1f) * crackAmp * crackleEnvL * master
-          cR = (Random.nextFloat() * 2f - 1f) * crackAmp * crackleEnvR * master
-
-          crackleEnvL *= envDecay
-          crackleEnvR *= envDecay
-        }
-
-        buffer[idx++] = floatToPcm16(nL + cL)
-        buffer[idx++] = floatToPcm16(nR + cR)
+      var cursor = 0
+      repeat(frameSize) {
+        val left = (Random.nextFloat() * 2f - 1f) * baseAmp * master
+        val right = (Random.nextFloat() * 2f - 1f) * baseAmp * master
+        buffer[cursor++] = floatToPcm16(left)
+        buffer[cursor++] = floatToPcm16(right)
       }
 
-      t.write(buffer, 0, buffer.size, AudioTrack.WRITE_BLOCKING)
+      track.write(buffer, 0, buffer.size, AudioTrack.WRITE_BLOCKING)
     }
   }
 
   private fun dbToAmp(db: Float): Float {
-    // amp = 10^(db/20)
     return 10.0.pow((db / 20.0).toDouble()).toFloat()
   }
 
-  private fun floatToPcm16(x: Float): Short {
-    val v = x.coerceIn(-1f, 1f)
-    return (v * 32767f).toInt().toShort()
+  private fun floatToPcm16(value: Float): Short {
+    return (value.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
   }
 }
