@@ -154,19 +154,37 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     _ui.update {
       it.copy(
         selectedGameId = gameId,
+        gameRunning = false,
         gameRuntimeState = runtimeState,
-        gameHudState = controller.hud(runtimeState, signals).copy(
-          inputEnabled = shouldEnableGameInput(gameId),
-        ),
-        gameAudioState = controller.audio(runtimeState, signals),
+        gameHudState = controller.hud(runtimeState, signals),
+        gameAudioState = controller.audio(runtimeState, signals).copy(muted = true),
       )
     }
-    gameAudio?.update(gameId, _ui.value.gameAudioState)
+    refreshSelectedGameUi()
+    syncFeedbackAudioState(fadeIn = true)
+  }
+
+  fun startGame() {
+    if (!canStartGame()) return
+    pendingGameEvents.clear()
+    lastGameUpdateMs = 0L
+    val controller = GameRegistry.controllerFor(_ui.value.selectedGameId)
+    val signals = currentGameSignals(System.currentTimeMillis())
+    val runtimeState = controller.initialState()
+    _ui.update {
+      it.copy(
+        gameRunning = true,
+        gameRuntimeState = runtimeState,
+        gameAudioState = controller.audio(runtimeState, signals).copy(muted = !shouldGameAudioBeAudible()),
+      )
+    }
+    refreshSelectedGameUi()
+    gameAudio?.update(_ui.value.selectedGameId, _ui.value.gameAudioState)
     syncFeedbackAudioState(fadeIn = true)
   }
 
   fun onGameTap() {
-    if (!_ui.value.selectedGameId.isHybrid()) return
+    if (!shouldEnableGameInput(_ui.value.selectedGameId)) return
     pendingGameEvents.add(GameEvent.Tap)
   }
 
@@ -279,17 +297,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         audioRunning = audio != null && it.audioEnabled,
         audioMuted = true,
         metricPlotSeries = emptyMap(),
+        gameRunning = false,
         gameSignals = initialGameSignals,
         gameRuntimeState = initialRuntimeState,
         gameAudioState = gameController.audio(initialRuntimeState, initialGameSignals).copy(muted = true),
-        gameHudState = gameController.hud(initialRuntimeState, initialGameSignals).copy(
-          inputEnabled = shouldEnableGameInput(it.selectedGameId),
-        ),
+        gameHudState = gameController.hud(initialRuntimeState, initialGameSignals),
       )
     }
 
     refreshRawPreview()
     refreshMetricPlotSeries()
+    refreshSelectedGameUi()
     syncFeedbackAudioState(fadeIn = false)
 
     sessionJob = viewModelScope.launch(Dispatchers.Default) {
@@ -356,14 +374,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         sessionElapsedSec = 0,
         audioRunning = false,
         audioMuted = true,
+        gameRunning = false,
         gameSignals = resetSignals,
         gameRuntimeState = resetRuntimeState,
         gameAudioState = gameController.audio(resetRuntimeState, resetSignals).copy(muted = true),
-        gameHudState = gameController.hud(resetRuntimeState, resetSignals).copy(
-          inputEnabled = false,
-        ),
+        gameHudState = gameController.hud(resetRuntimeState, resetSignals),
       )
     }
+    refreshSelectedGameUi()
   }
 
   fun togglePause() {
@@ -379,6 +397,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       _ui.update { it.copy(sessionPaused = false) }
       syncFeedbackAudioState(fadeIn = true)
     }
+    refreshSelectedGameUi()
   }
 
   fun toggleVisibleMetric(type: PlotType) {
@@ -650,8 +669,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val currentGameRuntime = _ui.value.gameRuntimeState
     val currentGameHud = selectedGameController.hud(currentGameRuntime, gameSignals).copy(
       inputEnabled = shouldEnableGameInput(_ui.value.selectedGameId),
+      inputHint = gameInputHint(_ui.value.selectedGameId, _ui.value.gameRunning),
     )
-    val currentGameAudioState = selectedGameController.audio(currentGameRuntime, gameSignals)
+    val currentGameAudioState = selectedGameController.audio(currentGameRuntime, gameSignals).copy(
+      muted = !shouldGameAudioBeAudible(),
+    )
 
     val shouldNoiseAudioRun = shouldNoiseAudioBeAudible()
     if (shouldNoiseAudioRun) {
@@ -889,8 +911,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val nextRuntimeState = controller.step(runtimeState, dtSeconds, signals, events)
             val nextHudState = controller.hud(nextRuntimeState, signals).copy(
               inputEnabled = shouldEnableGameInput(_ui.value.selectedGameId),
+              inputHint = gameInputHint(_ui.value.selectedGameId, _ui.value.gameRunning),
             )
-            val nextGameAudioState = controller.audio(nextRuntimeState, signals)
+            val nextGameAudioState = controller.audio(nextRuntimeState, signals).copy(
+              muted = !shouldGameAudioBeAudible(),
+            )
 
             if (shouldGameAudioBeAudible()) {
               startGameAudioEngineIfNeeded()
@@ -914,7 +939,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _ui.update {
               it.copy(
                 gameSignals = signals,
-                gameHudState = controller.hud(runtimeState, signals).copy(inputEnabled = false),
+                gameAudioState = controller.audio(runtimeState, signals).copy(muted = true),
+                gameHudState = controller.hud(runtimeState, signals).copy(
+                  inputEnabled = false,
+                  inputHint = gameInputHint(it.selectedGameId, it.gameRunning),
+                ),
               )
             }
             gameAudio?.setMuted(true)
@@ -942,7 +971,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       !_ui.value.sessionPaused &&
       !_ui.value.calibrating &&
       !_ui.value.artefactCalibrationState.running &&
+      _ui.value.gameRunning &&
       _ui.value.selectedTab == AppTab.GAME
+  }
+
+  private fun canStartGame(): Boolean {
+    return _ui.value.sessionRunning &&
+      !_ui.value.sessionPaused &&
+      !_ui.value.calibrating &&
+      !_ui.value.artefactCalibrationState.running
   }
 
   private fun shouldEnableGameInput(gameId: GameId): Boolean {
@@ -964,6 +1001,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       !_ui.value.sessionPaused &&
       !_ui.value.calibrating &&
       !_ui.value.artefactCalibrationState.running &&
+      _ui.value.gameRunning &&
       _ui.value.selectedTab == AppTab.GAME
   }
 
@@ -988,11 +1026,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     _ui.update {
       it.copy(
         gameSignals = signals,
-        gameAudioState = controller.audio(runtimeState, signals),
+        gameAudioState = controller.audio(runtimeState, signals).copy(
+          muted = !shouldGameAudioBeAudible(),
+        ),
         gameHudState = controller.hud(runtimeState, signals).copy(
           inputEnabled = shouldEnableGameInput(it.selectedGameId),
+          inputHint = gameInputHint(it.selectedGameId, it.gameRunning),
         ),
       )
+    }
+  }
+
+  private fun gameInputHint(gameId: GameId, gameRunning: Boolean): String {
+    return when {
+      !_ui.value.sessionRunning -> "Start a headset session on Dashboard, then return here."
+      _ui.value.calibrating -> "Finish calibration, then press Start."
+      _ui.value.artefactCalibrationState.running -> "Finish artifact calibration or skip it, then press Start."
+      _ui.value.sessionPaused && gameRunning -> "Resume the session to continue ${gameId.displayName()}."
+      !gameRunning -> gameId.startHint()
+      else -> gameId.inputHint()
     }
   }
 
@@ -1083,8 +1135,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       it.copy(
         audioRunning = it.audioEnabled && (audio != null || gameAudio != null),
         audioMuted = !(shouldNoiseRun || shouldGameRun),
+        gameAudioState = it.gameAudioState.copy(muted = !shouldGameRun),
         gameHudState = it.gameHudState.copy(
           inputEnabled = shouldEnableGameInput(it.selectedGameId),
+          inputHint = gameInputHint(it.selectedGameId, it.gameRunning),
         ),
       )
     }

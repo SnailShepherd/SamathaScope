@@ -18,12 +18,12 @@ class GameControllersTest {
       correctionPulse = 0.6f,
     )
 
-    state = controller.step(state, dtSeconds = 0.1f, signals = signals, events = listOf(GameEvent.Tap))
-    repeat(12) {
-      state = controller.step(state, dtSeconds = 0.1f, signals = signals, events = emptyList())
+    repeat(24) { index ->
+      val events = if (index % 3 == 0) listOf(GameEvent.Tap) else emptyList()
+      state = controller.step(state, dtSeconds = 0.1f, signals = signals, events = events)
     }
 
-    assertThat(state.blocks).hasSize(1)
+    assertThat(state.placements).isGreaterThan(0)
   }
 
   @Test
@@ -39,6 +39,23 @@ class GameControllersTest {
     )
 
     assertThat(next.repairGlow).isGreaterThan(state.repairGlow)
+  }
+
+  @Test
+  fun inkGarden_generatesVisibleInkSegments() {
+    val controller = InkGardenController()
+    var state = controller.initialState()
+
+    repeat(12) {
+      state = controller.step(
+        state = state,
+        dtSeconds = 0.2f,
+        signals = GameSignalSnapshot(stability = 0.8f, drift = 0.2f, noise = 0.1f, fatigue = 0.05f),
+        events = emptyList(),
+      )
+    }
+
+    assertThat(state.segments).isNotEmpty()
   }
 
   @Test

@@ -47,14 +47,16 @@ class AppUiTest {
     composeRule.onNodeWithText("Game").performClick()
     composeRule.onNodeWithText("Sky Tower").assertExists()
     composeRule.onNodeWithText("Game picker").assertExists()
-    composeRule.onNodeWithText("EEG mapping").assertExists()
+    composeRule.onNodeWithText("Start Sky Tower").assertExists()
+    composeRule.onNodeWithText("Sky Tower guide").assertExists()
   }
 
   @Test
   fun gameTab_switchesBetweenHybridAndPassiveHints() {
     composeRule.onNodeWithText("Game").performClick()
-    composeRule.onNodeWithText("Tap to drop the moving block.").assertExists()
+    composeRule.onNodeWithText("Sky Tower guide").assertExists()
     composeRule.onNodeWithText("Fire Keeper").performClick()
-    composeRule.onNodeWithText("Passive scene: breathe, settle, and watch the scene respond.").assertExists()
+    composeRule.onNodeWithText("Start Fire Keeper").assertExists()
+    composeRule.onNodeWithText("Fire Keeper guide").assertExists()
   }
 }

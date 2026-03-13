@@ -55,7 +55,8 @@ class MainViewModelInstrumentedTest {
 
     val state = vm.ui.value
     assertEquals(GameId.SCRIPTORIUM, state.selectedGameId)
+    assertFalse(state.gameRunning)
     assertEquals("Scriptorium", state.gameHudState.title)
-    assertTrue(state.gameHudState.inputHint.contains("Passive scene"))
+    assertTrue(state.gameHudState.inputHint.contains("Start a headset session"))
   }
 }

@@ -163,6 +163,7 @@ private fun MainScreen(vm: MainViewModel) {
         AppTab.GAME -> GameTab(
           ui = ui,
           onSelectGame = vm::selectGame,
+          onStartGame = vm::startGame,
           onGameTap = vm::onGameTap,
         )
 
@@ -539,8 +540,24 @@ private fun SettingsTab(
 private fun GameTab(
   ui: UiState,
   onSelectGame: (GameId) -> Unit,
+  onStartGame: () -> Unit,
   onGameTap: () -> Unit,
 ) {
+  val gameGuide = ui.selectedGameId.guide()
+  val gameCanStart = ui.sessionRunning && !ui.sessionPaused && !ui.calibrating && !ui.artefactCalibrationState.running
+  val startLabel = if (ui.gameRunning) {
+    "Restart ${ui.selectedGameId.displayName()}"
+  } else {
+    "Start ${ui.selectedGameId.displayName()}"
+  }
+  val startHelper = when {
+    !ui.sessionRunning -> "Start a headset session on Dashboard first."
+    ui.calibrating -> "Wait for the baseline calibration to finish."
+    ui.artefactCalibrationState.running -> "Finish or skip artifact calibration before starting the game."
+    ui.sessionPaused -> "Resume the session before restarting the game."
+    ui.gameRunning -> "Running now. Press Restart whenever you want a fresh scene."
+    else -> "Selected only. The scene will stay still until you press Start."
+  }
   Column(
     modifier = Modifier
       .fillMaxSize()
@@ -552,6 +569,16 @@ private fun GameTab(
       Text(ui.gameHudState.title, fontWeight = FontWeight.SemiBold)
       Spacer(Modifier.height(8.dp))
       Text(ui.selectedGameId.description(), style = MaterialTheme.typography.bodySmall)
+      Spacer(Modifier.height(8.dp))
+      Button(
+        onClick = onStartGame,
+        enabled = gameCanStart,
+        modifier = Modifier.fillMaxWidth(),
+      ) {
+        Text(startLabel)
+      }
+      Spacer(Modifier.height(6.dp))
+      Text(startHelper, style = MaterialTheme.typography.bodySmall)
       Spacer(Modifier.height(8.dp))
       SelectedGameScene(
         ui = ui,
@@ -584,13 +611,11 @@ private fun GameTab(
     }
 
     Panel {
-      Text("EEG mapping", fontWeight = FontWeight.SemiBold)
+      Text(gameGuide.title, fontWeight = FontWeight.SemiBold)
       Spacer(Modifier.height(6.dp))
-      Text("Settledness drives coherence and structural integrity.", style = MaterialTheme.typography.bodySmall)
-      Text("Mind Wandering adds drift, tangles, sway, and broken continuity.", style = MaterialTheme.typography.bodySmall)
-      Text("Artefact Score becomes explicit glitches, tremors, splatters, sparks, and tears.", style = MaterialTheme.typography.bodySmall)
-      Text("Effortful Focus appears as a short rescue pulse instead of a constant bonus.", style = MaterialTheme.typography.bodySmall)
-      Text("Drowsiness only acts as a slow fatigue gate, not a second energy axis.", style = MaterialTheme.typography.bodySmall)
+      gameGuide.lines.forEach { line ->
+        Text(line, style = MaterialTheme.typography.bodySmall)
+      }
     }
   }
 }

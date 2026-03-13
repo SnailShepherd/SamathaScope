@@ -137,6 +137,7 @@ data class UiState(
   val lastRecordingPath: String? = null,
 
   val selectedGameId: GameId = GameId.SKY_TOWER,
+  val gameRunning: Boolean = false,
   val gameSignals: GameSignalSnapshot = GameSignalSnapshot(),
   val gameRuntimeState: GameRuntimeState = defaultGameRuntimeState(),
   val gameAudioState: GameAudioState = GameAudioState(muted = true),
