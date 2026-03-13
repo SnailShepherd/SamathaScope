@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MainViewModelInstrumentedTest {
@@ -43,5 +44,18 @@ class MainViewModelInstrumentedTest {
     val state = vm.ui.value
     assertFalse(state.audioEnabled)
     assertFalse(state.audioRunning)
+  }
+
+  @Test
+  fun selectGame_updatesSelectedSceneAndHud() {
+    val app = ApplicationProvider.getApplicationContext<Application>()
+    val vm = MainViewModel(app)
+
+    vm.selectGame(GameId.SCRIPTORIUM)
+
+    val state = vm.ui.value
+    assertEquals(GameId.SCRIPTORIUM, state.selectedGameId)
+    assertEquals("Scriptorium", state.gameHudState.title)
+    assertTrue(state.gameHudState.inputHint.contains("Passive scene"))
   }
 }

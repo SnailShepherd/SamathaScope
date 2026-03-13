@@ -48,20 +48,6 @@ data class BondedDevice(
   val display: String,
 )
 
-data class GameState(
-  val altitude: Float = 0.5f,
-  val velocity: Float = 0f,
-)
-
-data class GameHudState(
-  val metricValuePercent: Int = 0,
-  val artefactPercent: Int = 0,
-  val poorSignal: Int = 255,
-  val elapsedSeconds: Int = 0,
-  val batteryPercent: Int? = null,
-  val stateLabel: StateLabel = StateLabel.UNCERTAIN,
-)
-
 data class ArtefactCalibrationUiState(
   val available: Boolean = false,
   val dismissed: Boolean = false,
@@ -74,7 +60,6 @@ data class ArtefactCalibrationUiState(
   val completedPrompts: Int = 0,
   val totalPrompts: Int = ArtefactPrompt.entries.size,
 )
-
 data class UiState(
   val selectedTab: AppTab = AppTab.DASHBOARD,
 
@@ -151,8 +136,11 @@ data class UiState(
   val recordingEnabled: Boolean = false,
   val lastRecordingPath: String? = null,
 
-  val gameState: GameState = GameState(),
-  val gameHudState: GameHudState = GameHudState(),
+  val selectedGameId: GameId = GameId.SKY_TOWER,
+  val gameSignals: GameSignalSnapshot = GameSignalSnapshot(),
+  val gameRuntimeState: GameRuntimeState = defaultGameRuntimeState(),
+  val gameAudioState: GameAudioState = GameAudioState(muted = true),
+  val gameHudState: GameHudState = defaultGameHudState(),
 )
 
 fun defaultVisibleMetrics(): Set<PlotType> = linkedSetOf(

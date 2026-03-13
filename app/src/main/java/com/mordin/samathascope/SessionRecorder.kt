@@ -29,8 +29,9 @@ data class RecordedFeatureRow(
   val meditationProxy: Float,
   val feedbackMetric: PlotType,
   val feedbackValue: Float,
-  val gameMetric: PlotType,
-  val gameValue: Float,
+  val selectedGameId: GameId,
+  val gameSignals: GameSignalSnapshot,
+  val gameSummary: String,
 )
 
 fun recordedFeatureCsvHeader(): String {
@@ -111,8 +112,14 @@ fun recordedFeatureCsvHeader(): String {
     "displayed_state_label",
     "feedback_metric",
     "feedback_value",
-    "game_metric",
-    "game_value",
+    "selected_game_id",
+    "game_stability",
+    "game_drift",
+    "game_noise",
+    "game_fatigue",
+    "game_precision",
+    "game_correction_pulse",
+    "game_summary",
   ).joinToString(",")
 }
 
@@ -196,8 +203,14 @@ fun RecordedFeatureRow.toCsvRow(): String {
     displayedStateLabel.name,
     feedbackMetric.name,
     float(feedbackValue),
-    gameMetric.name,
-    float(gameValue),
+    selectedGameId.name,
+    float(gameSignals.stability),
+    float(gameSignals.drift),
+    float(gameSignals.noise),
+    float(gameSignals.fatigue),
+    float(gameSignals.precision),
+    float(gameSignals.correctionPulse),
+    gameSummary.replace(',', ';'),
   ).joinToString(",")
 }
 

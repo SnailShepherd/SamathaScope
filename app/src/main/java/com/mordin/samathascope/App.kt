@@ -162,7 +162,8 @@ private fun MainScreen(vm: MainViewModel) {
 
         AppTab.GAME -> GameTab(
           ui = ui,
-          onMetricChange = vm::setFeedbackMetric,
+          onSelectGame = vm::selectGame,
+          onGameTap = vm::onGameTap,
         )
 
         AppTab.LEARN -> LearnTab()
@@ -537,17 +538,9 @@ private fun SettingsTab(
 @Composable
 private fun GameTab(
   ui: UiState,
-  onMetricChange: (PlotType) -> Unit,
+  onSelectGame: (GameId) -> Unit,
+  onGameTap: () -> Unit,
 ) {
-  val altitudeAnim = remember { Animatable(ui.gameState.altitude) }
-
-  LaunchedEffect(ui.gameState.altitude) {
-    altitudeAnim.animateTo(
-      targetValue = ui.gameState.altitude,
-      animationSpec = tween(durationMillis = 240)
-    )
-  }
-
   Column(
     modifier = Modifier
       .fillMaxSize()
@@ -556,31 +549,48 @@ private fun GameTab(
     verticalArrangement = Arrangement.spacedBy(12.dp)
   ) {
     Panel {
-      Text(stringResource(R.string.game_scene_title), fontWeight = FontWeight.SemiBold)
+      Text(ui.gameHudState.title, fontWeight = FontWeight.SemiBold)
       Spacer(Modifier.height(8.dp))
-      LanternScene(
-        altitude = altitudeAnim.value,
-        glow = ui.gameHudState.metricValuePercent / 100f,
+      Text(ui.selectedGameId.description(), style = MaterialTheme.typography.bodySmall)
+      Spacer(Modifier.height(8.dp))
+      SelectedGameScene(
+        ui = ui,
+        onGameTap = onGameTap,
       )
       Spacer(Modifier.height(8.dp))
-      HudRow(label = stringResource(R.string.game_hud_metric), value = "${ui.gameHudState.metricValuePercent}%")
-      HudRow(label = stringResource(R.string.game_hud_artefact), value = "${ui.gameHudState.artefactPercent}%")
+      HudRow(label = ui.gameHudState.summaryLabel, value = ui.gameHudState.summaryValue)
+      HudRow(label = "Stability", value = "${ui.gameHudState.stabilityPercent}%")
+      HudRow(label = "Drift", value = "${ui.gameHudState.driftPercent}%")
+      HudRow(label = "Artefact noise", value = "${ui.gameHudState.noisePercent}%")
+      HudRow(label = "Fatigue gate", value = "${ui.gameHudState.fatiguePercent}%")
+      HudRow(label = "Correction pulse", value = "${ui.gameHudState.correctionPercent}%")
       HudRow(label = stringResource(R.string.game_hud_state), value = stateLabelLabel(ui.gameHudState.stateLabel))
       HudRow(label = stringResource(R.string.game_hud_signal), value = "${ui.gameHudState.poorSignal}")
       HudRow(label = stringResource(R.string.game_hud_elapsed), value = "${ui.gameHudState.elapsedSeconds}s")
       if (shouldShowBatteryRow(ui.gameHudState.batteryPercent)) {
         HudRow(label = stringResource(R.string.game_hud_battery), value = "${ui.gameHudState.batteryPercent}%")
       }
+      Spacer(Modifier.height(4.dp))
+      Text(ui.gameHudState.inputHint, style = MaterialTheme.typography.bodySmall)
     }
 
     Panel {
-      Text(stringResource(R.string.section_feedback_source), fontWeight = FontWeight.SemiBold)
+      Text("Game picker", fontWeight = FontWeight.SemiBold)
       Spacer(Modifier.height(6.dp))
-      MetricSourceRow(
-        options = MetricGlossary.feedbackSourceMetrics(),
-        selected = ui.feedbackMetric,
-        onSelect = onMetricChange,
+      GamePickerRow(
+        selected = ui.selectedGameId,
+        onSelect = onSelectGame,
       )
+    }
+
+    Panel {
+      Text("EEG mapping", fontWeight = FontWeight.SemiBold)
+      Spacer(Modifier.height(6.dp))
+      Text("Settledness drives coherence and structural integrity.", style = MaterialTheme.typography.bodySmall)
+      Text("Mind Wandering adds drift, tangles, sway, and broken continuity.", style = MaterialTheme.typography.bodySmall)
+      Text("Artefact Score becomes explicit glitches, tremors, splatters, sparks, and tears.", style = MaterialTheme.typography.bodySmall)
+      Text("Effortful Focus appears as a short rescue pulse instead of a constant bonus.", style = MaterialTheme.typography.bodySmall)
+      Text("Drowsiness only acts as a slow fatigue gate, not a second energy axis.", style = MaterialTheme.typography.bodySmall)
     }
   }
 }

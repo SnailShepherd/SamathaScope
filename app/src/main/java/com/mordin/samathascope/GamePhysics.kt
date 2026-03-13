@@ -1,35 +1,18 @@
 package com.mordin.samathascope
 
-data class LevitationState(
-  val altitude: Float,
-  val velocity: Float,
-)
+fun clamp01(value: Float): Float = value.coerceIn(0f, 1f)
 
-object GamePhysics {
-  fun step(
-    state: LevitationState,
-    target: Float,
-    dtSeconds: Float,
-    stiffness: Float = 7.0f,
-    damping: Float = 4.5f,
-  ): LevitationState {
-    val clampedTarget = target.coerceIn(0f, 1f)
-    var remaining = dtSeconds.coerceIn(0f, 1.0f)
-    var altitude = state.altitude
-    var velocity = state.velocity
+fun approach(current: Float, target: Float, factor: Float): Float {
+  return current + ((target - current) * factor.coerceIn(0f, 1f))
+}
 
-    while (remaining > 0f) {
-      val dt = remaining.coerceAtMost(0.1f)
-      val acceleration = stiffness * (clampedTarget - altitude) - damping * velocity
-      velocity += acceleration * dt
-      altitude = (altitude + velocity * dt).coerceIn(0f, 1f)
-      remaining -= dt
-    }
+fun damp(current: Float, amountPerSecond: Float, dtSeconds: Float): Float {
+  return current * (1f - (amountPerSecond * dtSeconds).coerceIn(0f, 0.98f))
+}
 
-    return LevitationState(altitude = altitude, velocity = velocity)
-  }
-
-  fun metricToTargetHeight(metricValue: Float): Float = metricValue.coerceIn(0f, 1f)
+fun sequenceFloat(index: Int, salt: Int = 0): Float {
+  val normalized = ((index * 37) + (salt * 17)).mod(100)
+  return normalized / 100f
 }
 
 fun shouldShowBatteryRow(batteryPercent: Int?): Boolean = batteryPercent != null

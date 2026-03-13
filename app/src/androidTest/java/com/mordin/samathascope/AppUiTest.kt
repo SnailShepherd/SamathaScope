@@ -43,9 +43,18 @@ class AppUiTest {
   }
 
   @Test
-  fun gameTab_opensLanternScene() {
+  fun gameTab_showsPickerAndMappings() {
     composeRule.onNodeWithText("Game").performClick()
-    composeRule.onNodeWithText("Lantern scene").assertExists()
-    composeRule.onNodeWithText("Shared feedback source").assertExists()
+    composeRule.onNodeWithText("Sky Tower").assertExists()
+    composeRule.onNodeWithText("Game picker").assertExists()
+    composeRule.onNodeWithText("EEG mapping").assertExists()
+  }
+
+  @Test
+  fun gameTab_switchesBetweenHybridAndPassiveHints() {
+    composeRule.onNodeWithText("Game").performClick()
+    composeRule.onNodeWithText("Tap to drop the moving block.").assertExists()
+    composeRule.onNodeWithText("Fire Keeper").performClick()
+    composeRule.onNodeWithText("Passive scene: breathe, settle, and watch the scene respond.").assertExists()
   }
 }
