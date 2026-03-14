@@ -9,6 +9,13 @@ import android.media.ToneGenerator
 import android.os.Build
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.mordin.samathascope.scene.godot.InkGardenTelemetry
+import com.mordin.samathascope.scene.SceneSignalInputs
+import com.mordin.samathascope.scene.SceneState
+import com.mordin.samathascope.scene.SceneStateProducer
+import com.mordin.samathascope.scene.buildSceneAudioState
+import com.mordin.samathascope.scene.buildSceneHudState
+import com.mordin.samathascope.scene.tower.SkyTowerSettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -17,6 +24,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.util.LinkedHashSet
+import java.util.Locale
 import java.util.concurrent.ConcurrentLinkedQueue
 import kotlin.math.max
 import kotlin.math.min
@@ -25,11 +33,30 @@ import kotlin.math.sqrt
 class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   private val ctx = app.applicationContext
+  private val rawSampleRateHz = DEBUG_RAW_LOOP_SAMPLE_RATE_HZ
   private val plotSettingsStore = createPlotSettingsStore(ctx)
+  private val skyTowerSettingsStore = createSkyTowerSettingsStore(ctx)
+  private val noiseColorStore = createNoiseColorStore(ctx)
+  private val inkGardenRefreshModeStore = createInkGardenRefreshModeStore(ctx)
+  private val debugRawLoopStore = createDebugRawLoopStore(ctx)
+  private var debugRawLoopRecord: DebugRawLoopRecord? =
+    debugRawLoopStore.load(rawSampleRateHz * DEBUG_RAW_LOOP_DURATION_SECONDS)
+  private val debugRawLoopCaptureBuffer = IntArray(rawSampleRateHz * DEBUG_RAW_LOOP_DURATION_SECONDS)
+  private var debugRawLoopCaptureCount = 0
+  private var debugRawLoopCapturePoorSignalSum = 0L
+  private var debugRawLoopCapturePoorSignalCount = 0
+  private var debugRawLoopCaptureAttentionSum = 0L
+  private var debugRawLoopCaptureAttentionCount = 0
+  private var debugRawLoopCaptureMeditationSum = 0L
+  private var debugRawLoopCaptureMeditationCount = 0
 
   private val _ui = MutableStateFlow(
     UiState(
       plotSettings = plotSettingsStore.load(),
+      skyTowerSettings = skyTowerSettingsStore.load(),
+      noiseColor = noiseColorStore.load(),
+      inkGarden = InkGardenUiState(refreshMode = inkGardenRefreshModeStore.load()),
+      debugRawLoopAvailable = debugRawLoopRecord != null,
     )
   )
   val ui: StateFlow<UiState> = _ui
@@ -41,7 +68,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   private var client: BluetoothMindWaveClient? = null
 
-  private val rawSampleRateHz = 512
   private val eegProcessor = EegProcessor(sampleRateHz = rawSampleRateHz)
   private val calibration = CalibrationManager(calibrationSeconds = 60)
   private val scorer = ScoreModel()
@@ -80,22 +106,30 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   private var pausedAccumMs: Long = 0L
   private var sessionJob: Job? = null
   private var gameLoopJob: Job? = null
+  private var streamMonitorJob: Job? = null
 
   private var audio: NoiseAudioEngine? = null
   private var gameAudio: GameSoundEngine? = null
   private var recorder: SessionRecorder? = null
   private val gameSignalMapper = GameSignalMapper()
+  private val sceneStateProducer = SceneStateProducer()
   private val pendingGameEvents = ConcurrentLinkedQueue<GameEvent>()
+  private var debugRawReplayJob: Job? = null
 
   private var rawCountThisSecond = 0
   private var lastRateTickMs: Long = 0L
+  private var lastMeasuredSamplesPerSecond = 0f
+  private var lastRawSampleAtMs: Long = 0L
+  private var firstRawBurstAtMs: Long = 0L
   private var rawPreviewDecim = 0
+  private var inkGardenRefreshTracker = InkGardenRefreshTracker()
 
   private var lastGameUpdateMs = 0L
   private var lastAdaptiveCalibrationUpdateMs = 0L
   private var calibrationRawCount = 0
   private var calibrationRawMean = 0.0
   private var calibrationRawM2 = 0.0
+  private var eyesClosedCuePlayed = false
   private var artefactPromptIndex = 0
   private var artefactPromptStartMs = 0L
   private var artefactCalibrationProfile = ArtefactCalibrationProfile()
@@ -111,6 +145,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     refreshRawPreview()
     refreshMetricPlotSeries()
     refreshSelectedGameUi()
+    startStreamMonitor()
   }
 
   fun onPermissionsResult(result: Map<String, Boolean>) {
@@ -141,21 +176,33 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   fun selectTab(tab: AppTab) {
     _ui.update { it.copy(selectedTab = tab) }
+    refreshSelectedGameUi()
     syncFeedbackAudioState()
   }
 
   fun selectGame(gameId: GameId) {
     pendingGameEvents.clear()
-    val controller = GameRegistry.controllerFor(gameId)
-    val signals = currentGameSignals(System.currentTimeMillis())
-    val runtimeState = controller.initialState()
+    inkGardenRefreshTracker = InkGardenRefreshTracker()
+    sceneStateProducer.restartScene(System.currentTimeMillis())
+    sceneStateProducer.setPlayback(active = false, frozen = true)
+    val sceneState = currentSceneState()
     _ui.update {
       it.copy(
         selectedGameId = gameId,
         gameRunning = false,
-        gameRuntimeState = runtimeState,
-        gameHudState = controller.hud(runtimeState, signals),
-        gameAudioState = controller.audio(runtimeState, signals).copy(muted = true),
+        gamePaused = false,
+        sceneState = sceneState,
+        gameAudioState = buildSceneAudioState(gameId, sceneState, muted = true),
+        sceneHudState = buildSceneHudState(
+          gameId = gameId,
+          sceneState = sceneState,
+          stateLabel = it.displayedStateLabel,
+          poorSignal = it.poorSignal,
+          elapsedSeconds = it.sessionElapsedSec,
+          batteryPercent = it.batteryPercent,
+          inputEnabled = false,
+          inputHint = gameInputHint(gameId, gameRunning = false),
+        ),
       )
     }
     refreshSelectedGameUi()
@@ -163,17 +210,26 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   }
 
   fun startGame() {
-    if (!canStartGame()) return
+    if (!canStartGame() || _ui.value.gameRunning) return
     pendingGameEvents.clear()
     lastGameUpdateMs = 0L
-    val controller = GameRegistry.controllerFor(_ui.value.selectedGameId)
-    val signals = currentGameSignals(System.currentTimeMillis())
-    val runtimeState = controller.initialState()
+    val now = System.currentTimeMillis()
+    sceneStateProducer.restartScene(now)
+    if (_ui.value.selectedGameId == GameId.INK_GARDEN) {
+      requestNewInkGardenPictureInternal(nowMs = now, preservePaused = false)
+    }
+    val sceneState = currentSceneState()
     _ui.update {
       it.copy(
         gameRunning = true,
-        gameRuntimeState = runtimeState,
-        gameAudioState = controller.audio(runtimeState, signals).copy(muted = !shouldGameAudioBeAudible()),
+        gamePaused = false,
+        gameRunId = it.gameRunId + 1,
+        sceneState = sceneState,
+        gameAudioState = buildSceneAudioState(
+          gameId = it.selectedGameId,
+          sceneState = sceneState,
+          muted = !shouldGameAudioBeAudible(),
+        ),
       )
     }
     refreshSelectedGameUi()
@@ -181,25 +237,88 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     syncFeedbackAudioState()
   }
 
+  fun toggleGamePause() {
+    if (!_ui.value.gameRunning) return
+    val nextPaused = !_ui.value.gamePaused
+    _ui.update { it.copy(gamePaused = nextPaused) }
+    refreshSelectedGameUi()
+    syncFeedbackAudioState(fadeIn = !nextPaused)
+  }
+
+  fun stopGame() {
+    if (!_ui.value.gameRunning && !_ui.value.gamePaused) return
+    pendingGameEvents.clear()
+    lastGameUpdateMs = 0L
+    inkGardenRefreshTracker = InkGardenRefreshTracker()
+    sceneStateProducer.restartScene(System.currentTimeMillis())
+    sceneStateProducer.setPlayback(active = false, frozen = true)
+    val sceneState = currentSceneState()
+    _ui.update {
+      it.copy(
+        gameRunning = false,
+        gamePaused = false,
+        gameRunId = it.gameRunId + 1,
+        inkGarden = it.inkGarden.copy(growthActive = false),
+        sceneState = sceneState,
+        gameAudioState = buildSceneAudioState(it.selectedGameId, sceneState, muted = true),
+      )
+    }
+    refreshSelectedGameUi()
+    syncFeedbackAudioState()
+  }
+
   fun onGameTap() {
-    if (!shouldEnableGameInput(_ui.value.selectedGameId)) return
-    pendingGameEvents.add(GameEvent.Tap)
+    // Scene-local hosts own input now.
   }
 
   fun connect() {
+    if (_ui.value.connected || _ui.value.headsetConnecting || _ui.value.debugRawLoopEnabled) return
     val mac = _ui.value.selectedDeviceMac ?: return
     val adapter = btAdapter ?: return
     val device = adapter.getRemoteDevice(mac)
 
-    disconnect()
+    client?.close()
+    client = null
+    resetStreamTracking()
 
     client = BluetoothMindWaveClient(device)
-    _ui.update { it.copy(connected = false, streamStallMs = 0, samplesPerSecond = 0f) }
+    _ui.update {
+      it.copy(
+        headsetConnecting = true,
+        connected = false,
+        eegStreamStatus = EegStreamStatus.DISCONNECTED,
+        eegStreamReady = false,
+        streamStallMs = 0,
+        samplesPerSecond = 0f,
+        batteryPercent = null,
+      )
+    }
 
     client?.connect(
-      onConnected = { _ui.update { it.copy(connected = true) } },
+      onConnected = {
+        _ui.update {
+          it.copy(
+            headsetConnecting = false,
+            connected = true,
+            eegStreamStatus = EegStreamStatus.WAITING_FOR_RAW,
+            eegStreamReady = false,
+          )
+        }
+      },
       onDisconnected = { _ ->
-        _ui.update { it.copy(connected = false) }
+        cancelDebugRawLoopCapture()
+        resetStreamTracking()
+        _ui.update {
+          it.copy(
+            headsetConnecting = false,
+            connected = false,
+            eegStreamStatus = EegStreamStatus.DISCONNECTED,
+            eegStreamReady = false,
+            streamStallMs = 0,
+            samplesPerSecond = 0f,
+            batteryPercent = null,
+          )
+        }
         stopSession()
       },
       onData = { data -> handleThinkGearData(data) }
@@ -207,14 +326,26 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   }
 
   fun disconnect() {
+    cancelDebugRawLoopCapture()
     stopSession()
     client?.close()
     client = null
-    _ui.update { it.copy(connected = false) }
+    resetStreamTracking()
+    _ui.update {
+      it.copy(
+        headsetConnecting = false,
+        connected = false,
+        eegStreamStatus = EegStreamStatus.DISCONNECTED,
+        eegStreamReady = false,
+        streamStallMs = 0,
+        samplesPerSecond = 0f,
+        batteryPercent = null,
+      )
+    }
   }
 
   fun startSession() {
-    if (_ui.value.sessionRunning || !_ui.value.connected) return
+    if (_ui.value.sessionRunning || !_ui.value.eegStreamReady) return
 
     eegProcessor.reset()
     eegProcessor.setNotchEnabled(_ui.value.notch50Enabled)
@@ -235,11 +366,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     lastFeatureTsMs = 0L
     lastGameUpdateMs = 0L
     lastAdaptiveCalibrationUpdateMs = 0L
+    eyesClosedCuePlayed = false
     artefactPromptIndex = 0
     artefactPromptStartMs = 0L
-    val gameController = GameRegistry.controllerFor(_ui.value.selectedGameId)
-    val initialGameSignals = currentGameSignals(System.currentTimeMillis())
-    val initialRuntimeState = gameController.initialState()
+    sceneStateProducer.reset()
+    val initialSceneState = currentSceneState()
 
     sessionStartMs = System.currentTimeMillis()
     pausedAtMs = 0L
@@ -272,7 +403,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         sessionPaused = false,
         calibrating = true,
         calibrationPhase = CalibrationPhase.EYES_OPEN,
-        calibrationInstruction = calibrationInstructionFor(CalibrationPhase.EYES_OPEN),
+        calibrationInstruction = calibrationInstructionFor(CalibrationPhase.EYES_OPEN, calibration.calibrationSeconds),
         calibrationRemainingSec = calibration.calibrationSeconds,
         artefactCalibrationState = ArtefactCalibrationUiState(),
         sessionElapsedSec = 0,
@@ -298,10 +429,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         rawPlotOffsetSeconds = 0,
         metricPlotOffsetSeconds = 0,
         gameRunning = false,
-        gameSignals = initialGameSignals,
-        gameRuntimeState = initialRuntimeState,
-        gameAudioState = gameController.audio(initialRuntimeState, initialGameSignals).copy(muted = true),
-        gameHudState = gameController.hud(initialRuntimeState, initialGameSignals),
+        gamePaused = false,
+        sceneState = initialSceneState,
+        gameAudioState = buildSceneAudioState(it.selectedGameId, initialSceneState, muted = true),
+        sceneHudState = buildSceneHudState(
+          gameId = it.selectedGameId,
+          sceneState = initialSceneState,
+          stateLabel = StateLabel.UNCERTAIN,
+          poorSignal = it.poorSignal,
+          elapsedSeconds = 0,
+          batteryPercent = it.batteryPercent,
+          inputEnabled = false,
+          inputHint = gameInputHint(it.selectedGameId, gameRunning = false),
+        ),
       )
     }
 
@@ -320,11 +460,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (_ui.value.calibrating) {
           val rem = calibration.remainingSeconds()
           val phase = if (rem > 30) CalibrationPhase.EYES_OPEN else CalibrationPhase.EYES_CLOSED
+          if (phase == CalibrationPhase.EYES_CLOSED && !eyesClosedCuePlayed) {
+            eyesClosedCuePlayed = true
+            if (_ui.value.audioEnabled) {
+              BellSoundPlayer.playCalibrationComplete()
+            }
+          }
           _ui.update {
             it.copy(
               calibrationRemainingSec = rem,
               calibrationPhase = phase,
-              calibrationInstruction = calibrationInstructionFor(phase),
+              calibrationInstruction = calibrationInstructionFor(phase, rem),
               sessionElapsedSec = elapsedSec,
             )
           }
@@ -354,13 +500,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     recorder?.stop()
     recorder = null
     calibration.resetArtefactCapture()
+    eyesClosedCuePlayed = false
     artefactPromptIndex = 0
     artefactPromptStartMs = 0L
     pendingGameEvents.clear()
     gameSignalMapper.reset()
-    val gameController = GameRegistry.controllerFor(_ui.value.selectedGameId)
-    val resetSignals = currentGameSignals(System.currentTimeMillis())
-    val resetRuntimeState = gameController.initialState()
+    sceneStateProducer.reset()
+    val resetSceneState = currentSceneState()
 
     _ui.update {
       it.copy(
@@ -375,10 +521,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         audioRunning = false,
         audioMuted = true,
         gameRunning = false,
-        gameSignals = resetSignals,
-        gameRuntimeState = resetRuntimeState,
-        gameAudioState = gameController.audio(resetRuntimeState, resetSignals).copy(muted = true),
-        gameHudState = gameController.hud(resetRuntimeState, resetSignals),
+        gamePaused = false,
+        sceneState = resetSceneState,
+        gameAudioState = buildSceneAudioState(it.selectedGameId, resetSceneState, muted = true),
+        sceneHudState = buildSceneHudState(
+          gameId = it.selectedGameId,
+          sceneState = resetSceneState,
+          stateLabel = StateLabel.UNCERTAIN,
+          poorSignal = it.poorSignal,
+          elapsedSeconds = 0,
+          batteryPercent = it.batteryPercent,
+          inputEnabled = false,
+          inputHint = gameInputHint(it.selectedGameId, gameRunning = false),
+        ),
       )
     }
     refreshSelectedGameUi()
@@ -442,6 +597,61 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   fun setInvertReward(value: Boolean) = _ui.update { it.copy(invertReward = value) }
 
+  fun setNoiseColor(value: NoiseColor) {
+    _ui.update { it.copy(noiseColor = value) }
+    noiseColorStore.save(value)
+  }
+
+  fun setInkGardenRefreshMode(value: InkGardenRefreshMode) {
+    _ui.update {
+      it.copy(
+        inkGarden = it.inkGarden.copy(refreshMode = value),
+      )
+    }
+    inkGardenRefreshModeStore.save(value)
+  }
+
+  fun requestNewInkGardenPicture() {
+    if (_ui.value.selectedGameId != GameId.INK_GARDEN) return
+    if (!_ui.value.sessionRunning || !_ui.value.gameRunning) return
+    requestNewInkGardenPictureInternal(
+      nowMs = System.currentTimeMillis(),
+      preservePaused = _ui.value.gamePaused,
+    )
+  }
+
+  fun onInkGardenTelemetryChanged(telemetry: InkGardenTelemetry) {
+    if (_ui.value.selectedGameId != GameId.INK_GARDEN) return
+    if (telemetry.version != _ui.value.inkGarden.pictureVersion) return
+
+    val now = System.currentTimeMillis()
+    inkGardenRefreshTracker = updateInkGardenRefreshTracker(
+      tracker = inkGardenRefreshTracker,
+      richness = telemetry.richness,
+      nowMs = now,
+    )
+    _ui.update {
+      it.copy(
+        inkGarden = it.inkGarden.copy(
+          richness = telemetry.richness.coerceIn(0f, 1f),
+          growthActive = telemetry.growthActive,
+          motifName = telemetry.motifName,
+        ),
+      )
+    }
+    if (
+      shouldAutoRefreshInkGarden(
+        mode = _ui.value.inkGarden.refreshMode,
+        eligible = isInkGardenAutoRefreshEligible(),
+        richness = telemetry.richness,
+        tracker = inkGardenRefreshTracker,
+        nowMs = now,
+      )
+    ) {
+      requestNewInkGardenPictureInternal(nowMs = now, preservePaused = false)
+    }
+  }
+
   fun setGamma(value: Float) = _ui.update { it.copy(gamma = value) }
 
   fun setGMinDb(value: Int) = _ui.update { it.copy(gMinDb = min(value, _ui.value.gMaxDb - 1)) }
@@ -449,6 +659,107 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   fun setGMaxDb(value: Int) = _ui.update { it.copy(gMaxDb = max(value, _ui.value.gMinDb + 1)) }
 
   fun setRecordingEnabled(value: Boolean) = _ui.update { it.copy(recordingEnabled = value) }
+
+  fun startDebugRawLoopCapture() {
+    if (_ui.value.debugRawLoopEnabled || _ui.value.debugRawLoopCapturing) return
+    if (!_ui.value.connected || !_ui.value.eegStreamReady) return
+    debugRawLoopCaptureCount = 0
+    debugRawLoopCapturePoorSignalSum = 0L
+    debugRawLoopCapturePoorSignalCount = 0
+    debugRawLoopCaptureAttentionSum = 0L
+    debugRawLoopCaptureAttentionCount = 0
+    debugRawLoopCaptureMeditationSum = 0L
+    debugRawLoopCaptureMeditationCount = 0
+    _ui.update {
+      it.copy(
+        debugRawLoopCapturing = true,
+        debugRawLoopCapturedSeconds = 0,
+      )
+    }
+  }
+
+  fun cancelDebugRawLoopCapture() {
+    if (!_ui.value.debugRawLoopCapturing) return
+    debugRawLoopCaptureCount = 0
+    debugRawLoopCapturePoorSignalSum = 0L
+    debugRawLoopCapturePoorSignalCount = 0
+    debugRawLoopCaptureAttentionSum = 0L
+    debugRawLoopCaptureAttentionCount = 0
+    debugRawLoopCaptureMeditationSum = 0L
+    debugRawLoopCaptureMeditationCount = 0
+    _ui.update {
+      it.copy(
+        debugRawLoopCapturing = false,
+        debugRawLoopCapturedSeconds = 0,
+      )
+    }
+  }
+
+  fun setDebugRawLoopEnabled(value: Boolean) {
+    if (_ui.value.sessionRunning || value == _ui.value.debugRawLoopEnabled) return
+
+    if (value) {
+      val loopRecord = debugRawLoopRecord ?: return
+      cancelDebugRawLoopCapture()
+      if (_ui.value.connected || _ui.value.headsetConnecting) {
+        disconnect()
+      }
+      eegProcessor.reset()
+      metricHistory.reset()
+      refreshRawPreview()
+      refreshMetricPlotSeries()
+      resetStreamTracking()
+      _ui.update {
+        it.copy(
+          debugRawLoopEnabled = true,
+          poorSignal = loopRecord.metadata.poorSignal,
+          attention = loopRecord.metadata.attention,
+          meditation = loopRecord.metadata.meditation,
+          eegStreamStatus = EegStreamStatus.WAITING_FOR_RAW,
+          eegStreamReady = false,
+          samplesPerSecond = 0f,
+          streamStallMs = 0L,
+          rawPlotOffsetSeconds = 0,
+          metricPlotOffsetSeconds = 0,
+        )
+      }
+      startDebugRawReplay(loopRecord.samples)
+      refreshSelectedGameUi()
+      return
+    }
+
+    stopDebugRawReplay()
+    resetStreamTracking()
+    _ui.update {
+      it.copy(
+        debugRawLoopEnabled = false,
+        poorSignal = if (it.connected) it.poorSignal else 255,
+        attention = if (it.connected) it.attention else 0,
+        meditation = if (it.connected) it.meditation else 0,
+        eegStreamStatus = EegStreamStatus.DISCONNECTED,
+        eegStreamReady = false,
+        samplesPerSecond = 0f,
+        streamStallMs = 0L,
+        rawPlotOffsetSeconds = 0,
+        metricPlotOffsetSeconds = 0,
+      )
+    }
+    refreshRawPreview()
+    refreshMetricPlotSeries()
+    refreshSelectedGameUi()
+  }
+
+  fun setSkyTowerBaseWidthScale(value: Float) {
+    updateSkyTowerSettings { it.copy(baseWidthScale = value) }
+  }
+
+  fun setSkyTowerCarrierSpeedMultiplier(value: Float) {
+    updateSkyTowerSettings { it.copy(carrierSpeedMultiplier = value) }
+  }
+
+  fun setSkyTowerIrregularity(value: Float) {
+    updateSkyTowerSettings { it.copy(irregularity = value) }
+  }
 
   fun panRawPlotBy(deltaSeconds: Int) {
     if (!canPanPlots()) return
@@ -482,7 +793,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   }
 
   fun setMetricWindowSeconds(seconds: Int) {
-    val normalized = seconds.coerceIn(60, 600)
+    val normalized = METRIC_WINDOW_OPTIONS.minBy { option -> kotlin.math.abs(option - seconds) }
     val updated = _ui.value.plotSettings.mapValues { (type, settings) ->
       if (type == PlotType.RAW) settings else settings.copy(windowSeconds = normalized)
     }
@@ -544,6 +855,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     syncFeedbackAudioState(fadeIn = true)
   }
 
+  fun skipCalibration() {
+    if (!_ui.value.sessionRunning || !_ui.value.calibrating) return
+    finishCleanCalibration(now = System.currentTimeMillis(), skipped = true)
+  }
+
   fun testBeep() {
     viewModelScope.launch(Dispatchers.Default) {
       try {
@@ -559,33 +875,173 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
   }
 
+  private fun appendDebugRawLoopCapture(raw: Int) {
+    if (!_ui.value.debugRawLoopCapturing) return
+    if (debugRawLoopCaptureCount >= debugRawLoopCaptureBuffer.size) return
+
+    debugRawLoopCaptureBuffer[debugRawLoopCaptureCount] = raw
+    debugRawLoopCaptureCount++
+
+    val capturedSeconds = (debugRawLoopCaptureCount / rawSampleRateHz)
+      .coerceIn(0, DEBUG_RAW_LOOP_DURATION_SECONDS)
+    if (capturedSeconds != _ui.value.debugRawLoopCapturedSeconds) {
+      _ui.update { it.copy(debugRawLoopCapturedSeconds = capturedSeconds) }
+    }
+
+    if (debugRawLoopCaptureCount < debugRawLoopCaptureBuffer.size) return
+
+    val savedRecord = DebugRawLoopRecord(
+      samples = debugRawLoopCaptureBuffer.copyOf(),
+      metadata = buildDebugRawLoopMetadata(),
+    )
+    debugRawLoopStore.save(savedRecord)
+    debugRawLoopRecord = savedRecord
+    _ui.update {
+      it.copy(
+        debugRawLoopAvailable = true,
+        debugRawLoopCapturing = false,
+        debugRawLoopCapturedSeconds = DEBUG_RAW_LOOP_DURATION_SECONDS,
+      )
+    }
+  }
+
+  private fun appendDebugRawLoopCapturePoorSignal(value: Int) {
+    if (!_ui.value.debugRawLoopCapturing) return
+    debugRawLoopCapturePoorSignalSum += value.coerceIn(0, 255)
+    debugRawLoopCapturePoorSignalCount++
+  }
+
+  private fun appendDebugRawLoopCaptureAttention(value: Int) {
+    if (!_ui.value.debugRawLoopCapturing) return
+    debugRawLoopCaptureAttentionSum += value.coerceIn(0, 100)
+    debugRawLoopCaptureAttentionCount++
+  }
+
+  private fun appendDebugRawLoopCaptureMeditation(value: Int) {
+    if (!_ui.value.debugRawLoopCapturing) return
+    debugRawLoopCaptureMeditationSum += value.coerceIn(0, 100)
+    debugRawLoopCaptureMeditationCount++
+  }
+
+  private fun buildDebugRawLoopMetadata(): DebugRawLoopMetadata {
+    fun averaged(sum: Long, count: Int, fallback: Int, min: Int, max: Int): Int {
+      if (count <= 0) return fallback.coerceIn(min, max)
+      return (sum.toDouble() / count.toDouble()).toInt().coerceIn(min, max)
+    }
+
+    return DebugRawLoopMetadata(
+      poorSignal = averaged(
+        sum = debugRawLoopCapturePoorSignalSum,
+        count = debugRawLoopCapturePoorSignalCount,
+        fallback = _ui.value.poorSignal,
+        min = 0,
+        max = 255,
+      ),
+      attention = averaged(
+        sum = debugRawLoopCaptureAttentionSum,
+        count = debugRawLoopCaptureAttentionCount,
+        fallback = _ui.value.attention,
+        min = 0,
+        max = 100,
+      ),
+      meditation = averaged(
+        sum = debugRawLoopCaptureMeditationSum,
+        count = debugRawLoopCaptureMeditationCount,
+        fallback = _ui.value.meditation,
+        min = 0,
+        max = 100,
+      ),
+    )
+  }
+
+  private fun startDebugRawReplay(samples: IntArray) {
+    stopDebugRawReplay()
+    debugRawReplayJob = viewModelScope.launch(Dispatchers.Default) {
+      var sampleIndex = 0
+      var sampleClockMs = System.currentTimeMillis()
+      var fractionalSampleMs = 0.0
+      while (_ui.value.debugRawLoopEnabled) {
+        repeat(DEBUG_RAW_LOOP_CHUNK_SAMPLES) {
+          if (!_ui.value.debugRawLoopEnabled) return@launch
+          handleRawSample(
+            raw = samples[sampleIndex],
+            source = RawSignalSource.DEBUG_REPLAY,
+            receivedAtMs = System.currentTimeMillis(),
+            sampleTimestampMs = sampleClockMs,
+          )
+          sampleIndex = (sampleIndex + 1) % samples.size
+          fractionalSampleMs += DEBUG_RAW_LOOP_SAMPLE_PERIOD_MS
+          val wholeMs = fractionalSampleMs.toLong()
+          if (wholeMs > 0L) {
+            sampleClockMs += wholeMs
+            fractionalSampleMs -= wholeMs.toDouble()
+          }
+        }
+        delay(DEBUG_RAW_LOOP_CHUNK_DELAY_MS)
+      }
+    }
+  }
+
+  private fun stopDebugRawReplay() {
+    debugRawReplayJob?.cancel()
+    debugRawReplayJob = null
+  }
+
   private fun handleThinkGearData(data: ThinkGearData) {
     when (data) {
-      is ThinkGearData.PoorSignal -> _ui.update { it.copy(poorSignal = data.value) }
-      is ThinkGearData.Attention -> _ui.update { it.copy(attention = data.value) }
-      is ThinkGearData.Meditation -> _ui.update { it.copy(meditation = data.value) }
-      is ThinkGearData.RawSample -> handleRawSample(data.value)
+      is ThinkGearData.Battery -> _ui.update {
+        it.copy(
+          batteryPercent = data.value.coerceIn(0, 100),
+          sceneHudState = it.sceneHudState.copy(batteryPercent = data.value.coerceIn(0, 100)),
+        )
+      }
+      is ThinkGearData.PoorSignal -> {
+        appendDebugRawLoopCapturePoorSignal(data.value)
+        _ui.update { it.copy(poorSignal = data.value) }
+      }
+      is ThinkGearData.Attention -> {
+        appendDebugRawLoopCaptureAttention(data.value)
+        _ui.update { it.copy(attention = data.value) }
+      }
+      is ThinkGearData.Meditation -> {
+        appendDebugRawLoopCaptureMeditation(data.value)
+        _ui.update { it.copy(meditation = data.value) }
+      }
+      is ThinkGearData.RawSample -> handleRawSample(data.value, source = RawSignalSource.LIVE)
       else -> Unit
     }
   }
 
-  private fun handleRawSample(raw: Int) {
-    val now = System.currentTimeMillis()
+  private fun handleRawSample(
+    raw: Int,
+    source: RawSignalSource,
+    receivedAtMs: Long = System.currentTimeMillis(),
+    sampleTimestampMs: Long = receivedAtMs,
+  ) {
+    val now = receivedAtMs
+
+    if (lastRawSampleAtMs == 0L || now - lastRawSampleAtMs > EEG_STREAM_STALE_MS) {
+      firstRawBurstAtMs = now
+    }
+    lastRawSampleAtMs = now
 
     if (lastRateTickMs == 0L) lastRateTickMs = now
     rawCountThisSecond++
     if (now - lastRateTickMs >= 1000L) {
-      val samplesPerSecond = rawCountThisSecond * 1000f / max(1L, now - lastRateTickMs).toFloat()
+      lastMeasuredSamplesPerSecond = rawCountThisSecond * 1000f / max(1L, now - lastRateTickMs).toFloat()
       rawCountThisSecond = 0
       lastRateTickMs = now
-      _ui.update { it.copy(samplesPerSecond = samplesPerSecond) }
+    }
+
+    if (source == RawSignalSource.LIVE) {
+      appendDebugRawLoopCapture(raw)
     }
 
     recorder?.appendRaw(raw.toShort())
 
     if (_ui.value.sessionRunning && _ui.value.calibrating) addCalibrationRaw(raw)
 
-    val features = eegProcessor.pushRaw(raw, now)
+    val features = eegProcessor.pushRaw(raw, sampleTimestampMs)
 
     rawPreviewDecim++
     if (!_ui.value.sessionPaused && rawPreviewDecim % 32 == 0) {
@@ -678,14 +1134,34 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       effortfulFocus = smoothedProbabilities.effortfulFocus,
       timestampMs = now,
     )
+    sceneStateProducer.updateInputs(
+      SceneSignalInputs(
+        settledness = smoothedSettledness,
+        alertness = smoothedAlertness,
+        control = smoothedControl,
+        qualityConfidence = smoothedQualityConfidence,
+        artefactScore = smoothedArtefact,
+        effortfulFocus = smoothedProbabilities.effortfulFocus,
+        mindWandering = smoothedProbabilities.mindWandering,
+        displayedDrowsyScore = displayedDrowsy,
+        timestampMs = now,
+      )
+    )
     val gameSignals = currentGameSignals(now, displayedState = displayedState, poorSignal = poorSignal)
-    val selectedGameController = GameRegistry.controllerFor(_ui.value.selectedGameId)
-    val currentGameRuntime = _ui.value.gameRuntimeState
-    val currentGameHud = selectedGameController.hud(currentGameRuntime, gameSignals).copy(
+    val currentSceneState = currentSceneState()
+    val currentSceneHud = buildSceneHudState(
+      gameId = _ui.value.selectedGameId,
+      sceneState = currentSceneState,
+      stateLabel = displayedState,
+      poorSignal = poorSignal,
+      elapsedSeconds = _ui.value.sessionElapsedSec,
+      batteryPercent = _ui.value.batteryPercent,
       inputEnabled = shouldEnableGameInput(_ui.value.selectedGameId),
       inputHint = gameInputHint(_ui.value.selectedGameId, _ui.value.gameRunning),
     )
-    val currentGameAudioState = selectedGameController.audio(currentGameRuntime, gameSignals).copy(
+    val currentGameAudioState = buildSceneAudioState(
+      gameId = _ui.value.selectedGameId,
+      sceneState = currentSceneState,
       muted = !shouldGameAudioBeAudible(),
     )
 
@@ -695,6 +1171,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       audio?.update(
         feedbackValue = feedback,
         invertReward = _ui.value.invertReward,
+        noiseColor = _ui.value.noiseColor,
         gamma = _ui.value.gamma,
         gMinDb = _ui.value.gMinDb,
         gMaxDb = _ui.value.gMaxDb,
@@ -727,7 +1204,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         feedbackValue = feedback,
         selectedGameId = _ui.value.selectedGameId,
         gameSignals = gameSignals,
-        gameSummary = gameRuntimeSummary(currentGameRuntime),
+        sceneState = currentSceneState,
+        gameSummary = "${_ui.value.selectedGameId.name.lowercase()}:scene-progress=${"%.3f".format(Locale.US, currentSceneState.progress)}",
       )
     )
 
@@ -760,20 +1238,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         artefactStall = output.quality.stall,
         artefactBlinkNormalizationHz = artefactCalibrationProfile.blinkNormalizationHz,
         artefactEmgNormalizationHfRatio = artefactCalibrationProfile.emgNormalizationHfRatio,
-        streamStallMs = features.maxGapMs,
         audioRunning = shouldNoiseAudioRun || shouldGameAudioBeAudible(),
         audioMuted = !(shouldNoiseAudioRun || shouldGameAudioBeAudible()),
         audioBaseDb = audio?.debugBaseDb ?: it.audioBaseDb,
-        gameSignals = gameSignals,
+        sceneState = currentSceneState,
         gameAudioState = currentGameAudioState,
-        gameHudState = currentGameHud,
+        sceneHudState = currentSceneHud,
       )
     }
 
     refreshMetricPlotSeries()
   }
 
-  private fun finishCleanCalibration(now: Long) {
+  private fun finishCleanCalibration(now: Long, skipped: Boolean = false) {
     scorer.setCalibration(calibration.buildCalibration())
     calibration.seedAdaptiveWindowFromCalibration()
     lastAdaptiveCalibrationUpdateMs = now
@@ -784,11 +1261,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         calibrating = false,
         calibrationPhase = CalibrationPhase.BASELINE_COMPLETE,
         calibrationInstruction = calibrationInstructionFor(CalibrationPhase.BASELINE_COMPLETE),
+        calibrationRemainingSec = 0,
         artefactCalibrationState = ArtefactCalibrationUiState(available = true),
       )
     }
 
-    if (_ui.value.audioEnabled) {
+    if (!skipped && _ui.value.audioEnabled) {
       BellSoundPlayer.playCalibrationComplete()
     }
     syncFeedbackAudioState(fadeIn = true)
@@ -900,64 +1378,49 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     gameLoopJob = viewModelScope.launch(Dispatchers.Default) {
       while (_ui.value.sessionRunning) {
         val now = System.currentTimeMillis()
-        if (_ui.value.selectedTab == AppTab.GAME) {
-          val signals = currentGameSignals(now)
-          val controller = GameRegistry.controllerFor(_ui.value.selectedGameId)
-          val runtimeState = _ui.value.gameRuntimeState
-          val dtSeconds = if (lastGameUpdateMs == 0L) {
-            1f / 30f
-          } else {
-            ((now - lastGameUpdateMs).toFloat() / 1000f).coerceIn(1f / 120f, 0.10f)
-          }
-          lastGameUpdateMs = now
+        sceneStateProducer.setPlayback(
+          active = _ui.value.sessionRunning && _ui.value.gameRunning,
+          frozen = _ui.value.sessionPaused ||
+            _ui.value.calibrating ||
+            _ui.value.artefactCalibrationState.running ||
+            _ui.value.gamePaused ||
+            _ui.value.selectedTab != AppTab.GAME,
+        )
+        sceneStateProducer.tick(now)
+        val sceneState = currentSceneState()
+        val nextGameAudioState = buildSceneAudioState(
+          gameId = _ui.value.selectedGameId,
+          sceneState = sceneState,
+          muted = !shouldGameAudioBeAudible(),
+        )
 
-          if (shouldGameLoopRun()) {
-            val events = drainGameEvents()
-            val nextRuntimeState = controller.step(runtimeState, dtSeconds, signals, events)
-            val nextHudState = controller.hud(nextRuntimeState, signals).copy(
-              inputEnabled = shouldEnableGameInput(_ui.value.selectedGameId),
-              inputHint = gameInputHint(_ui.value.selectedGameId, _ui.value.gameRunning),
-            )
-            val nextGameAudioState = controller.audio(nextRuntimeState, signals).copy(
-              muted = !shouldGameAudioBeAudible(),
-            )
-
-            if (shouldGameAudioBeAudible()) {
-              ensureSessionAudioEngines()
-              gameAudio?.update(_ui.value.selectedGameId, nextGameAudioState)
-              gameAudio?.setMuted(false)
-            } else {
-              gameAudio?.setMuted(true)
-            }
-
-            _ui.update {
-              it.copy(
-                gameSignals = signals,
-                gameRuntimeState = nextRuntimeState,
-                gameAudioState = nextGameAudioState,
-                gameHudState = nextHudState,
-                audioRunning = shouldNoiseAudioBeAudible() || shouldGameAudioBeAudible(),
-                audioMuted = !(shouldNoiseAudioBeAudible() || shouldGameAudioBeAudible()),
-              )
-            }
-          } else {
-            _ui.update {
-              it.copy(
-                gameSignals = signals,
-                gameAudioState = controller.audio(runtimeState, signals).copy(muted = true),
-                gameHudState = controller.hud(runtimeState, signals).copy(
-                  inputEnabled = false,
-                  inputHint = gameInputHint(it.selectedGameId, it.gameRunning),
-                ),
-              )
-            }
-            gameAudio?.setMuted(true)
-          }
+        if (shouldGameAudioBeAudible()) {
+          ensureSessionAudioEngines()
+          gameAudio?.update(_ui.value.selectedGameId, nextGameAudioState)
+          gameAudio?.setMuted(false)
         } else {
-          lastGameUpdateMs = now
           gameAudio?.setMuted(true)
         }
-        delay(33L)
+
+        _ui.update {
+          it.copy(
+            sceneState = sceneState,
+            gameAudioState = nextGameAudioState,
+            sceneHudState = buildSceneHudState(
+              gameId = it.selectedGameId,
+              sceneState = sceneState,
+              stateLabel = it.displayedStateLabel,
+              poorSignal = it.poorSignal,
+              elapsedSeconds = it.sessionElapsedSec,
+              batteryPercent = it.batteryPercent,
+              inputEnabled = shouldEnableGameInput(it.selectedGameId),
+              inputHint = gameInputHint(it.selectedGameId, it.gameRunning),
+            ),
+            audioRunning = shouldNoiseAudioBeAudible() || shouldGameAudioBeAudible(),
+            audioMuted = !(shouldNoiseAudioBeAudible() || shouldGameAudioBeAudible()),
+          )
+        }
+        delay(50L)
       }
     }
   }
@@ -971,12 +1434,48 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     return drained
   }
 
+  private fun startStreamMonitor() {
+    streamMonitorJob?.cancel()
+    streamMonitorJob = viewModelScope.launch(Dispatchers.Default) {
+      while (true) {
+        val snapshot = buildEegStreamSnapshot(
+          connected = _ui.value.connected,
+          debugReplayEnabled = _ui.value.debugRawLoopEnabled,
+          nowMs = System.currentTimeMillis(),
+          lastRawSampleAtMs = lastRawSampleAtMs,
+          firstRawBurstAtMs = firstRawBurstAtMs,
+          lastMeasuredSamplesPerSecond = lastMeasuredSamplesPerSecond,
+          rawCountThisSecond = rawCountThisSecond,
+          lastRateTickMs = lastRateTickMs,
+        )
+        _ui.update {
+          it.copy(
+            eegStreamStatus = snapshot.status,
+            eegStreamReady = snapshot.ready,
+            samplesPerSecond = snapshot.samplesPerSecond,
+            streamStallMs = snapshot.stallMs,
+          )
+        }
+        delay(250L)
+      }
+    }
+  }
+
+  private fun resetStreamTracking() {
+    rawCountThisSecond = 0
+    lastRateTickMs = 0L
+    lastMeasuredSamplesPerSecond = 0f
+    lastRawSampleAtMs = 0L
+    firstRawBurstAtMs = 0L
+  }
+
   private fun shouldGameLoopRun(): Boolean {
     return _ui.value.sessionRunning &&
       !_ui.value.sessionPaused &&
       !_ui.value.calibrating &&
       !_ui.value.artefactCalibrationState.running &&
       _ui.value.gameRunning &&
+      !_ui.value.gamePaused &&
       _ui.value.selectedTab == AppTab.GAME
   }
 
@@ -987,8 +1486,28 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       !_ui.value.artefactCalibrationState.running
   }
 
+  private fun updateSkyTowerSettings(transform: (SkyTowerSettings) -> SkyTowerSettings) {
+    var updatedSettings = _ui.value.skyTowerSettings
+    _ui.update { current ->
+      updatedSettings = transform(current.skyTowerSettings).clamped()
+      current.copy(skyTowerSettings = updatedSettings)
+    }
+    skyTowerSettingsStore.save(updatedSettings)
+  }
+
   private fun shouldEnableGameInput(gameId: GameId): Boolean {
     return shouldGameLoopRun() && gameId.isHybrid()
+  }
+
+  private fun isInkGardenAutoRefreshEligible(): Boolean {
+    return _ui.value.selectedGameId == GameId.INK_GARDEN &&
+      _ui.value.sessionRunning &&
+      _ui.value.gameRunning &&
+      !_ui.value.sessionPaused &&
+      !_ui.value.calibrating &&
+      !_ui.value.artefactCalibrationState.running &&
+      !_ui.value.gamePaused &&
+      _ui.value.selectedTab == AppTab.GAME
   }
 
   private fun shouldNoiseAudioBeAudible(): Boolean {
@@ -1007,6 +1526,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       !_ui.value.calibrating &&
       !_ui.value.artefactCalibrationState.running &&
       _ui.value.gameRunning &&
+      !_ui.value.gamePaused &&
       _ui.value.selectedTab == AppTab.GAME
   }
 
@@ -1024,17 +1544,54 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     )
   }
 
-  private fun refreshSelectedGameUi(nowMs: Long = System.currentTimeMillis()) {
-    val controller = GameRegistry.controllerFor(_ui.value.selectedGameId)
-    val signals = currentGameSignals(nowMs)
-    val runtimeState = _ui.value.gameRuntimeState
+  private fun currentSceneState(): SceneState = sceneStateProducer.state.value
+
+  private fun requestNewInkGardenPictureInternal(
+    nowMs: Long,
+    preservePaused: Boolean,
+  ) {
+    val current = _ui.value.inkGarden
+    val nextVersion = current.pictureVersion + 1
+    val nextSeed = nextInkGardenCompositionSeed(nowMs = nowMs, version = nextVersion)
+    inkGardenRefreshTracker = InkGardenRefreshTracker(lastImprovementAtMs = nowMs)
     _ui.update {
       it.copy(
-        gameSignals = signals,
-        gameAudioState = controller.audio(runtimeState, signals).copy(
+        inkGarden = it.inkGarden.copy(
+          pictureVersion = nextVersion,
+          compositionSeed = nextSeed,
+          richness = 0f,
+          growthActive = false,
+          motifName = null,
+        ),
+        gamePaused = preservePaused,
+      )
+    }
+  }
+
+  private fun nextInkGardenCompositionSeed(nowMs: Long, version: Int): Int {
+    val mixed = nowMs xor (version.toLong() shl 21) xor (sessionStartMs shl 7) xor (lastRawSampleAtMs shl 3)
+    val folded = (mixed xor (mixed ushr 32)).toInt()
+    val normalized = folded and Int.MAX_VALUE
+    return normalized.coerceAtLeast(1)
+  }
+
+  private fun refreshSelectedGameUi(nowMs: Long = System.currentTimeMillis()) {
+    val sceneState = currentSceneState()
+    _ui.update {
+      it.copy(
+        sceneState = sceneState,
+        gameAudioState = buildSceneAudioState(
+          gameId = it.selectedGameId,
+          sceneState = sceneState,
           muted = !shouldGameAudioBeAudible(),
         ),
-        gameHudState = controller.hud(runtimeState, signals).copy(
+        sceneHudState = buildSceneHudState(
+          gameId = it.selectedGameId,
+          sceneState = sceneState,
+          stateLabel = it.displayedStateLabel,
+          poorSignal = it.poorSignal,
+          elapsedSeconds = it.sessionElapsedSec,
+          batteryPercent = it.batteryPercent,
           inputEnabled = shouldEnableGameInput(it.selectedGameId),
           inputHint = gameInputHint(it.selectedGameId, it.gameRunning),
         ),
@@ -1048,6 +1605,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       _ui.value.calibrating -> "Finish calibration, then press Start."
       _ui.value.artefactCalibrationState.running -> "Finish artifact calibration or skip it, then press Start."
       _ui.value.sessionPaused && gameRunning -> "Resume the session to continue ${gameId.displayName()}."
+      _ui.value.gamePaused && gameRunning -> "Press Resume to continue ${gameId.displayName()}."
       !gameRunning -> gameId.startHint()
       else -> gameId.inputHint()
     }
@@ -1059,6 +1617,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       audio = NoiseAudioEngine().apply {
         start()
         setMuted(true)
+        update(
+          feedbackValue = 0f,
+          invertReward = _ui.value.invertReward,
+          noiseColor = _ui.value.noiseColor,
+          gamma = _ui.value.gamma,
+          gMinDb = _ui.value.gMinDb,
+          gMaxDb = _ui.value.gMaxDb,
+        )
       }
     }
     if (gameAudio == null) {
@@ -1093,7 +1659,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
           audioRunning = false,
           audioMuted = true,
           gameAudioState = it.gameAudioState.copy(muted = true),
-          gameHudState = it.gameHudState.copy(
+          sceneHudState = it.sceneHudState.copy(
             inputEnabled = shouldEnableGameInput(it.selectedGameId),
             inputHint = gameInputHint(it.selectedGameId, it.gameRunning),
           ),
@@ -1112,7 +1678,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         audioRunning = shouldNoiseRun || shouldGameRun,
         audioMuted = !(shouldNoiseRun || shouldGameRun),
         gameAudioState = it.gameAudioState.copy(muted = !shouldGameRun),
-        gameHudState = it.gameHudState.copy(
+        sceneHudState = it.sceneHudState.copy(
           inputEnabled = shouldEnableGameInput(it.selectedGameId),
           inputHint = gameInputHint(it.selectedGameId, it.gameRunning),
         ),
@@ -1224,12 +1790,30 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     refreshRawPreview()
   }
 
-  private fun calibrationInstructionFor(phase: CalibrationPhase): String {
+  private fun calibrationInstructionFor(phase: CalibrationPhase, remainingSeconds: Int = 0): String {
     return when (phase) {
-      CalibrationPhase.EYES_OPEN -> ctx.getString(R.string.calibration_phase_eyes_open)
-      CalibrationPhase.EYES_CLOSED -> ctx.getString(R.string.calibration_phase_eyes_closed)
+      CalibrationPhase.EYES_OPEN -> {
+        val countdown = eyesClosedCountdownValue(remainingSeconds)
+        if (countdown != null) {
+          ctx.getString(R.string.calibration_phase_eyes_open_countdown, countdown)
+        } else {
+          ctx.getString(R.string.calibration_phase_eyes_open)
+        }
+      }
+
+      CalibrationPhase.EYES_CLOSED -> {
+        if (remainingSeconds == 30) {
+          ctx.getString(R.string.calibration_phase_eyes_closed_now)
+        } else {
+          ctx.getString(R.string.calibration_phase_eyes_closed)
+        }
+      }
       CalibrationPhase.BASELINE_COMPLETE -> ctx.getString(R.string.calibration_phase_complete)
     }
+  }
+
+  private fun eyesClosedCountdownValue(remainingSeconds: Int): Int? {
+    return calibrationEyesClosedCountdownValue(remainingSeconds)
   }
 
   private fun artefactPromptLabel(prompt: ArtefactPrompt): String {
@@ -1250,8 +1834,87 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     super.onCleared()
     sessionJob?.cancel()
     gameLoopJob?.cancel()
+    streamMonitorJob?.cancel()
+    debugRawReplayJob?.cancel()
     shutdownAudioEngines()
     client?.close()
     client = null
   }
+}
+
+internal data class EegStreamSnapshot(
+  val status: EegStreamStatus,
+  val ready: Boolean,
+  val samplesPerSecond: Float,
+  val stallMs: Long,
+)
+
+internal fun buildEegStreamSnapshot(
+  connected: Boolean,
+  debugReplayEnabled: Boolean,
+  nowMs: Long,
+  lastRawSampleAtMs: Long,
+  firstRawBurstAtMs: Long,
+  lastMeasuredSamplesPerSecond: Float,
+  rawCountThisSecond: Int,
+  lastRateTickMs: Long,
+): EegStreamSnapshot {
+  if (!connected && !debugReplayEnabled) {
+    return EegStreamSnapshot(
+      status = EegStreamStatus.DISCONNECTED,
+      ready = false,
+      samplesPerSecond = 0f,
+      stallMs = 0L,
+    )
+  }
+
+  if (lastRawSampleAtMs == 0L) {
+    return EegStreamSnapshot(
+      status = EegStreamStatus.WAITING_FOR_RAW,
+      ready = false,
+      samplesPerSecond = 0f,
+      stallMs = 0L,
+    )
+  }
+
+  val sampleWindowMs = (nowMs - lastRateTickMs).coerceAtLeast(1L)
+  val provisionalSamplesPerSecond = if (lastRateTickMs == 0L) {
+    0f
+  } else {
+    rawCountThisSecond * 1000f / sampleWindowMs.toFloat()
+  }
+  val effectiveSamplesPerSecond = max(lastMeasuredSamplesPerSecond, provisionalSamplesPerSecond)
+  val stallMs = (nowMs - lastRawSampleAtMs).coerceAtLeast(0L)
+  val status = when {
+    stallMs > EEG_STREAM_STALE_MS -> EegStreamStatus.STALLED
+    firstRawBurstAtMs == 0L || nowMs - firstRawBurstAtMs < EEG_STREAM_CONFIRM_MS -> EegStreamStatus.CONFIRMING
+    effectiveSamplesPerSecond < EEG_STREAM_READY_MIN_SAMPLES_PER_SECOND -> EegStreamStatus.CONFIRMING
+    debugReplayEnabled -> EegStreamStatus.DEBUG_REPLAY
+    else -> EegStreamStatus.LIVE
+  }
+
+  return EegStreamSnapshot(
+    status = status,
+    ready = status == EegStreamStatus.LIVE || status == EegStreamStatus.DEBUG_REPLAY,
+    samplesPerSecond = effectiveSamplesPerSecond,
+    stallMs = stallMs,
+  )
+}
+
+internal fun calibrationEyesClosedCountdownValue(remainingSeconds: Int): Int? {
+  return if (remainingSeconds in 31..40) remainingSeconds - 30 else null
+}
+
+internal val METRIC_WINDOW_OPTIONS = listOf(60, 180, 300, 600)
+
+private const val EEG_STREAM_CONFIRM_MS = 600L
+private const val EEG_STREAM_STALE_MS = 900L
+private const val EEG_STREAM_READY_MIN_SAMPLES_PER_SECOND = 96f
+private const val DEBUG_RAW_LOOP_CHUNK_SAMPLES = 16
+private const val DEBUG_RAW_LOOP_CHUNK_DELAY_MS = 31L
+private val DEBUG_RAW_LOOP_SAMPLE_PERIOD_MS = 1000.0 / DEBUG_RAW_LOOP_SAMPLE_RATE_HZ.toDouble()
+
+private enum class RawSignalSource {
+  LIVE,
+  DEBUG_REPLAY,
 }

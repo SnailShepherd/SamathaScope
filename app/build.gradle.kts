@@ -12,14 +12,20 @@ android {
     applicationId = "com.mordin.samathascope"
     minSdk = 26
     targetSdk = 35
-    versionCode = 6
-    versionName = "0.6"
+    versionCode = 7
+    versionName = "0.7"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
   buildFeatures {
     compose = true
+  }
+
+  sourceSets {
+    getByName("main") {
+      assets.srcDirs("src/main/assets", "../godot")
+    }
   }
 
   compileOptions {
@@ -45,10 +51,17 @@ dependencies {
   debugImplementation("androidx.compose.ui:ui-tooling")
 
   implementation("androidx.activity:activity-compose:1.12.4")
+  implementation("androidx.fragment:fragment-ktx:1.8.9")
   implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
   implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
+  implementation("androidx.ink:ink-authoring:1.0.0")
+  implementation("androidx.ink:ink-brush:1.0.0")
+  implementation("androidx.ink:ink-rendering:1.0.0")
+  implementation("androidx.ink:ink-strokes:1.0.0")
 
   implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+  implementation("org.dyn4j:dyn4j:5.0.2")
+  implementation("org.godotengine:godot:4.6.0.stable")
 
   testImplementation("junit:junit:4.13.2")
   testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")

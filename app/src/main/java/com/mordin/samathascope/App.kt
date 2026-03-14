@@ -66,10 +66,15 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.mordin.samathascope.scene.GameSceneHost
+import com.mordin.samathascope.scene.SceneSummary
+import com.mordin.samathascope.scene.defaultSummary
+import com.mordin.samathascope.scene.tower.SkyTowerSettings
 import kotlinx.coroutines.launch
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -148,7 +153,9 @@ private fun MainScreen(vm: MainViewModel) {
           onRefreshDevices = vm::refreshBondedDevices,
           onSelectDevice = vm::selectDevice,
           onConnectToggle = { if (ui.connected) vm.disconnect() else vm.connect() },
+          onDebugRawLoopEnabledChange = vm::setDebugRawLoopEnabled,
           onStartSession = vm::startSession,
+          onSkipCalibration = vm::skipCalibration,
           onTogglePause = vm::togglePause,
           onStopSession = vm::stopSession,
           onSetFeedbackMetric = vm::setFeedbackMetric,
@@ -167,6 +174,7 @@ private fun MainScreen(vm: MainViewModel) {
           ui = ui,
           onAudioEnabledChange = vm::setAudioEnabled,
           onInvertRewardChange = vm::setInvertReward,
+          onNoiseColorChange = vm::setNoiseColor,
           onGammaChange = vm::setGamma,
           onGMinDbChange = vm::setGMinDb,
           onGMaxDbChange = vm::setGMaxDb,
@@ -174,13 +182,22 @@ private fun MainScreen(vm: MainViewModel) {
           onMetricWindowChange = vm::setMetricWindowSeconds,
           onRecordingChange = vm::setRecordingEnabled,
           onNotch50Change = vm::setNotch50Enabled,
+          onStartDebugRawLoopCapture = vm::startDebugRawLoopCapture,
+          onCancelDebugRawLoopCapture = vm::cancelDebugRawLoopCapture,
+          onSkyTowerBaseWidthScaleChange = vm::setSkyTowerBaseWidthScale,
+          onSkyTowerCarrierSpeedMultiplierChange = vm::setSkyTowerCarrierSpeedMultiplier,
+          onSkyTowerIrregularityChange = vm::setSkyTowerIrregularity,
         )
 
         AppTab.GAME -> GameTab(
           ui = ui,
           onSelectGame = vm::selectGame,
           onStartGame = vm::startGame,
-          onGameTap = vm::onGameTap,
+          onToggleGamePause = vm::toggleGamePause,
+          onStopGame = vm::stopGame,
+          onSetInkGardenRefreshMode = vm::setInkGardenRefreshMode,
+          onRequestNewInkGardenPicture = vm::requestNewInkGardenPicture,
+          onInkGardenTelemetryChanged = vm::onInkGardenTelemetryChanged,
         )
 
         AppTab.LEARN -> LearnTab()
@@ -206,7 +223,9 @@ private fun DashboardTab(
   onRefreshDevices: () -> Unit,
   onSelectDevice: (String) -> Unit,
   onConnectToggle: () -> Unit,
+  onDebugRawLoopEnabledChange: (Boolean) -> Unit,
   onStartSession: () -> Unit,
+  onSkipCalibration: () -> Unit,
   onTogglePause: () -> Unit,
   onStopSession: () -> Unit,
   onSetFeedbackMetric: (PlotType) -> Unit,
@@ -237,21 +256,23 @@ private fun DashboardTab(
             onRefreshDevices = onRefreshDevices,
             onSelectDevice = onSelectDevice,
             onConnectToggle = onConnectToggle,
+            onDebugRawLoopEnabledChange = onDebugRawLoopEnabledChange,
+          )
+          RawEegSection(
+            ui = ui,
+            onPan = onPanRawPlot,
+            onResetToLatest = onResetRawPlot,
           )
           SessionSection(
             ui = ui,
             onStartSession = onStartSession,
+            onSkipCalibration = onSkipCalibration,
             onTogglePause = onTogglePause,
             onStopSession = onStopSession,
             onSetFeedbackMetric = onSetFeedbackMetric,
             onStartArtefactCalibration = onStartArtefactCalibration,
             onLaterArtefactCalibration = onLaterArtefactCalibration,
             onSkipArtefactCalibration = onSkipArtefactCalibration,
-          )
-          RawEegSection(
-            ui = ui,
-            onPan = onPanRawPlot,
-            onResetToLatest = onResetRawPlot,
           )
           MetricExplorerSection(
             ui = ui,
@@ -273,21 +294,23 @@ private fun DashboardTab(
           onRefreshDevices = onRefreshDevices,
           onSelectDevice = onSelectDevice,
           onConnectToggle = onConnectToggle,
+          onDebugRawLoopEnabledChange = onDebugRawLoopEnabledChange,
+        )
+        RawEegSection(
+          ui = ui,
+          onPan = onPanRawPlot,
+          onResetToLatest = onResetRawPlot,
         )
         SessionSection(
           ui = ui,
           onStartSession = onStartSession,
+          onSkipCalibration = onSkipCalibration,
           onTogglePause = onTogglePause,
           onStopSession = onStopSession,
           onSetFeedbackMetric = onSetFeedbackMetric,
           onStartArtefactCalibration = onStartArtefactCalibration,
           onLaterArtefactCalibration = onLaterArtefactCalibration,
           onSkipArtefactCalibration = onSkipArtefactCalibration,
-        )
-        RawEegSection(
-          ui = ui,
-          onPan = onPanRawPlot,
-          onResetToLatest = onResetRawPlot,
         )
         MetricExplorerSection(
           ui = ui,
@@ -309,6 +332,7 @@ private fun HeadsetSection(
   onRefreshDevices: () -> Unit,
   onSelectDevice: (String) -> Unit,
   onConnectToggle: () -> Unit,
+  onDebugRawLoopEnabledChange: (Boolean) -> Unit,
 ) {
   Panel {
     Text(stringResource(R.string.section_headset), fontWeight = FontWeight.SemiBold)
@@ -318,7 +342,16 @@ private fun HeadsetSection(
       horizontalArrangement = Arrangement.SpaceBetween,
       verticalAlignment = Alignment.CenterVertically,
     ) {
-      Text(stringResource(if (ui.connected) R.string.headset_connected else R.string.headset_disconnected))
+      Text(
+        stringResource(
+          when {
+            ui.debugRawLoopEnabled -> R.string.debug_raw_replay_active
+            ui.headsetConnecting -> R.string.connecting
+            ui.connected -> R.string.headset_connected
+            else -> R.string.headset_disconnected
+          }
+        )
+      )
       if (!ui.btPermissionGranted && Build.VERSION.SDK_INT >= 31) {
         OutlinedButton(onClick = onGrantPermissions) {
           Text(stringResource(R.string.grant_permissions))
@@ -327,28 +360,91 @@ private fun HeadsetSection(
     }
 
     Spacer(Modifier.height(6.dp))
+    HudRow(
+      label = stringResource(R.string.headset_link_label),
+      value = stringResource(
+        when {
+          ui.debugRawLoopEnabled -> R.string.debug_raw_replay_active
+          ui.headsetConnecting -> R.string.connecting
+          ui.connected -> R.string.headset_connected
+          else -> R.string.headset_disconnected
+        }
+      ),
+    )
+    HudRow(
+      label = stringResource(R.string.headset_stream_label),
+      value = stringResource(eegStreamStatusLabel(ui.eegStreamStatus)),
+    )
+    Text(
+      text = stringResource(
+        if (ui.debugRawLoopEnabled && !ui.eegStreamReady) {
+          R.string.headset_status_helper_debug_replay_waiting
+        } else if (ui.headsetConnecting) {
+          R.string.headset_status_helper_connecting
+        } else {
+          headsetStatusHelperText(ui.eegStreamStatus)
+        }
+      ),
+      style = MaterialTheme.typography.bodySmall,
+    )
+
+    Spacer(Modifier.height(6.dp))
     DevicePicker(
       devices = ui.bondedDevices,
       selectedMac = ui.selectedDeviceMac,
-      enabled = ui.btPermissionGranted && !ui.connected,
+      enabled = ui.btPermissionGranted && !ui.connected && !ui.headsetConnecting && !ui.debugRawLoopEnabled,
       onSelect = onSelectDevice,
     )
 
     Spacer(Modifier.height(8.dp))
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
       CompactActionButton(
-        label = stringResource(if (ui.connected) R.string.disconnect else R.string.connect),
-        enabled = ui.btPermissionGranted && ui.selectedDeviceMac != null,
+        label = stringResource(
+          when {
+            ui.debugRawLoopEnabled -> R.string.debug_raw_replay_active
+            ui.headsetConnecting -> R.string.connecting
+            ui.connected -> R.string.disconnect
+            else -> R.string.connect
+          }
+        ),
+        enabled = ui.btPermissionGranted &&
+          ui.selectedDeviceMac != null &&
+          !ui.headsetConnecting &&
+          !ui.debugRawLoopEnabled,
         filled = true,
         onClick = onConnectToggle,
         modifier = Modifier.weight(1f),
       )
       CompactActionButton(
         label = stringResource(R.string.refresh_devices),
-        enabled = ui.btPermissionGranted,
+        enabled = ui.btPermissionGranted && !ui.headsetConnecting && !ui.debugRawLoopEnabled,
         filled = false,
         onClick = onRefreshDevices,
         modifier = Modifier.weight(1f),
+      )
+    }
+
+    Spacer(Modifier.height(8.dp))
+    if (ui.debugRawLoopAvailable) {
+      LabeledCheckbox(
+        checked = ui.debugRawLoopEnabled,
+        label = stringResource(R.string.debug_raw_replay_use_saved),
+        enabled = !ui.sessionRunning && !ui.debugRawLoopCapturing,
+        checkboxModifier = Modifier.testTag("dashboard_debug_raw_replay_toggle"),
+        onCheckedChange = onDebugRawLoopEnabledChange,
+      )
+      Text(
+        text = if (ui.debugRawLoopEnabled) {
+          stringResource(R.string.debug_raw_replay_status_active)
+        } else {
+          stringResource(R.string.debug_raw_replay_status_ready)
+        },
+        style = MaterialTheme.typography.bodySmall,
+      )
+    } else {
+      Text(
+        stringResource(R.string.debug_raw_replay_headset_missing),
+        style = MaterialTheme.typography.bodySmall,
       )
     }
   }
@@ -358,6 +454,7 @@ private fun HeadsetSection(
 private fun SessionSection(
   ui: UiState,
   onStartSession: () -> Unit,
+  onSkipCalibration: () -> Unit,
   onTogglePause: () -> Unit,
   onStopSession: () -> Unit,
   onSetFeedbackMetric: (PlotType) -> Unit,
@@ -371,10 +468,12 @@ private fun SessionSection(
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
       CompactActionButton(
         label = stringResource(R.string.start_session),
-        enabled = ui.connected && !ui.sessionRunning,
+        enabled = ui.eegStreamReady && !ui.sessionRunning,
         filled = true,
         onClick = onStartSession,
-        modifier = Modifier.weight(1f),
+        modifier = Modifier
+          .weight(1f)
+          .testTag("dashboard_start_session"),
       )
       CompactActionButton(
         label = stringResource(if (ui.sessionPaused) R.string.resume_session else R.string.pause_session),
@@ -389,6 +488,23 @@ private fun SessionSection(
         filled = false,
         onClick = onStopSession,
         modifier = Modifier.weight(1f),
+      )
+    }
+
+    if (!ui.sessionRunning) {
+      Spacer(Modifier.height(8.dp))
+      Text(
+        text = stringResource(
+          when {
+            ui.debugRawLoopEnabled && !ui.eegStreamReady -> R.string.session_start_blocked_debug_replay_waiting
+            ui.debugRawLoopEnabled -> R.string.session_start_ready_debug_replay
+            ui.headsetConnecting -> R.string.session_start_blocked_connecting
+            !ui.connected -> R.string.session_start_blocked_disconnected
+            !ui.eegStreamReady -> R.string.session_start_blocked_waiting_for_stream
+            else -> R.string.session_start_ready
+          }
+        ),
+        style = MaterialTheme.typography.bodySmall,
       )
     }
 
@@ -409,6 +525,15 @@ private fun SessionSection(
         modifier = Modifier.fillMaxWidth()
       )
       Text(ui.calibrationInstruction, style = MaterialTheme.typography.bodySmall)
+      Text(stringResource(R.string.calibration_skip_helper), style = MaterialTheme.typography.bodySmall)
+      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedButton(
+          onClick = onSkipCalibration,
+          modifier = Modifier.testTag("dashboard_skip_calibration"),
+        ) {
+          Text(stringResource(R.string.skip_calibration))
+        }
+      }
     } else {
       Column(verticalArrangement = Arrangement.spacedBy(3.dp), modifier = Modifier.fillMaxWidth()) {
         HudRow(label = stringResource(R.string.session_elapsed_label), value = "${ui.sessionElapsedSec}s")
@@ -435,19 +560,6 @@ private fun RawEegSection(
 ) {
   val settings = ui.plotSettings.getValue(PlotType.RAW)
   Panel {
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically,
-    ) {
-      Text(stringResource(R.string.section_raw_eeg), fontWeight = FontWeight.SemiBold)
-      if (ui.rawPlotOffsetSeconds > 0) {
-        TextButton(onClick = onResetToLatest) {
-          Text("Latest")
-        }
-      }
-    }
-    Spacer(Modifier.height(6.dp))
     WaveformPlot(
       samples = ui.rawPreview,
       yMin = settings.yMin,
@@ -456,6 +568,16 @@ private fun RawEegSection(
       pannable = !ui.sessionRunning || ui.sessionPaused,
       onPan = onPan,
     )
+    if (ui.rawPlotOffsetSeconds > 0) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.End,
+      ) {
+        TextButton(onClick = onResetToLatest) {
+          Text("Latest")
+        }
+      }
+    }
   }
 }
 
@@ -472,43 +594,30 @@ private fun MetricExplorerSection(
   val coroutineScope = rememberCoroutineScope()
 
   Panel {
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically,
-    ) {
-      Text(stringResource(R.string.section_live_plot), fontWeight = FontWeight.SemiBold)
-      if (ui.metricPlotOffsetSeconds > 0) {
-        TextButton(onClick = onResetToLatest) {
-          Text("Latest")
-        }
-      }
-    }
+    Text(stringResource(R.string.section_live_plot), fontWeight = FontWeight.SemiBold)
     Text(stringResource(R.string.metric_explorer_hint), style = MaterialTheme.typography.bodySmall)
     Spacer(Modifier.height(6.dp))
-
-    MetricChipRow(
-      options = MetricGlossary.dashboardMetrics(),
-      visibleMetrics = ui.visibleMetrics,
-      onTap = {
-        onToggleMetric(it)
-        onFocusMetricInfo(it)
-        coroutineScope.launch { bringIntoViewRequester.bringIntoView() }
-      },
-      onLongPress = {
-        onFocusMetricInfo(it)
-        coroutineScope.launch { bringIntoViewRequester.bringIntoView() }
-      },
-    )
-
-    Spacer(Modifier.height(10.dp))
     MultiMetricPlot(
       series = ui.metricPlotSeries,
       pannable = !ui.sessionRunning || ui.sessionPaused,
       onPan = onPanPlot,
     )
     Spacer(Modifier.height(8.dp))
-    MetricLegendRow(ui.visibleMetrics.toList())
+    MetricChipRow(
+      options = MetricGlossary.dashboardMetrics(),
+      visibleMetrics = ui.visibleMetrics,
+      onTap = onToggleMetric,
+      onLongPress = {
+        onFocusMetricInfo(it)
+        coroutineScope.launch { bringIntoViewRequester.bringIntoView() }
+      },
+    )
+    if (ui.metricPlotOffsetSeconds > 0) {
+      Spacer(Modifier.height(8.dp))
+      TextButton(onClick = onResetToLatest) {
+        Text("Latest")
+      }
+    }
 
     Spacer(Modifier.height(8.dp))
     MetricExplainer(
@@ -523,6 +632,7 @@ private fun SettingsTab(
   ui: UiState,
   onAudioEnabledChange: (Boolean) -> Unit,
   onInvertRewardChange: (Boolean) -> Unit,
+  onNoiseColorChange: (NoiseColor) -> Unit,
   onGammaChange: (Float) -> Unit,
   onGMinDbChange: (Int) -> Unit,
   onGMaxDbChange: (Int) -> Unit,
@@ -530,6 +640,11 @@ private fun SettingsTab(
   onMetricWindowChange: (Int) -> Unit,
   onRecordingChange: (Boolean) -> Unit,
   onNotch50Change: (Boolean) -> Unit,
+  onStartDebugRawLoopCapture: () -> Unit,
+  onCancelDebugRawLoopCapture: () -> Unit,
+  onSkyTowerBaseWidthScaleChange: (Float) -> Unit,
+  onSkyTowerCarrierSpeedMultiplierChange: (Float) -> Unit,
+  onSkyTowerIrregularityChange: (Float) -> Unit,
 ) {
   Column(
     modifier = Modifier
@@ -550,6 +665,14 @@ private fun SettingsTab(
         label = stringResource(R.string.invert_reward),
         onCheckedChange = onInvertRewardChange,
       )
+      Spacer(Modifier.height(6.dp))
+      Text(stringResource(R.string.noise_color_label), style = MaterialTheme.typography.bodySmall)
+      Spacer(Modifier.height(6.dp))
+      NoiseColorSelector(
+        selected = ui.noiseColor,
+        onSelect = onNoiseColorChange,
+      )
+      Spacer(Modifier.height(6.dp))
       Text(stringResource(R.string.gamma_value, ui.gamma), style = MaterialTheme.typography.bodySmall)
       Slider(value = ui.gamma, onValueChange = onGammaChange, valueRange = 0.6f..3.0f)
       Text(stringResource(R.string.base_noise_range, ui.gMinDb, ui.gMaxDb), style = MaterialTheme.typography.bodySmall)
@@ -571,12 +694,52 @@ private fun SettingsTab(
     Panel {
       Text(stringResource(R.string.settings_plot_title), fontWeight = FontWeight.SemiBold)
       Spacer(Modifier.height(6.dp))
-      WindowSecondsDropdown(
+      WindowSecondsSlider(
         selectedSeconds = ui.plotSettings.getValue(PlotType.MEDITATION_PROXY).windowSeconds,
-        options = listOf(60, 180, 300, 600),
+        options = METRIC_WINDOW_OPTIONS,
         onSelected = onMetricWindowChange,
       )
       Text(stringResource(R.string.settings_plot_helper), style = MaterialTheme.typography.bodySmall)
+    }
+
+    Panel {
+      Text("Sky Tower", fontWeight = FontWeight.SemiBold)
+      Spacer(Modifier.height(6.dp))
+      Text(
+        "Applies on the next Start or Stop -> Start.",
+        style = MaterialTheme.typography.bodySmall,
+      )
+      Spacer(Modifier.height(8.dp))
+
+      Text(
+        text = "Base width ${(ui.skyTowerSettings.baseWidthScale * 100f).roundToInt()}%",
+        style = MaterialTheme.typography.bodySmall,
+      )
+      Slider(
+        value = ui.skyTowerSettings.baseWidthScale,
+        onValueChange = onSkyTowerBaseWidthScaleChange,
+        valueRange = SkyTowerSettings.BASE_WIDTH_SCALE_RANGE,
+      )
+
+      Text(
+        text = "Carrier speed ${String.format(Locale.US, "%.2fx", ui.skyTowerSettings.carrierSpeedMultiplier)}",
+        style = MaterialTheme.typography.bodySmall,
+      )
+      Slider(
+        value = ui.skyTowerSettings.carrierSpeedMultiplier,
+        onValueChange = onSkyTowerCarrierSpeedMultiplierChange,
+        valueRange = SkyTowerSettings.CARRIER_SPEED_RANGE,
+      )
+
+      Text(
+        text = "Block irregularity ${(ui.skyTowerSettings.irregularity * 100f).roundToInt()}%",
+        style = MaterialTheme.typography.bodySmall,
+      )
+      Slider(
+        value = ui.skyTowerSettings.irregularity,
+        onValueChange = onSkyTowerIrregularityChange,
+        valueRange = SkyTowerSettings.IRREGULARITY_RANGE,
+      )
     }
 
     Panel {
@@ -595,6 +758,46 @@ private fun SettingsTab(
       ui.lastRecordingPath?.let {
         Text(stringResource(R.string.saved_under, it), style = MaterialTheme.typography.bodySmall)
       }
+
+      Spacer(Modifier.height(10.dp))
+      Text(stringResource(R.string.debug_raw_replay_title), fontWeight = FontWeight.SemiBold)
+      Text(stringResource(R.string.debug_raw_replay_helper), style = MaterialTheme.typography.bodySmall)
+      Spacer(Modifier.height(6.dp))
+      Text(
+        text = when {
+          ui.debugRawLoopCapturing -> stringResource(
+            R.string.debug_raw_replay_status_capturing,
+            ui.debugRawLoopCapturedSeconds,
+          )
+          ui.debugRawLoopEnabled -> stringResource(R.string.debug_raw_replay_status_active)
+          ui.debugRawLoopAvailable -> stringResource(R.string.debug_raw_replay_status_ready)
+          else -> stringResource(R.string.debug_raw_replay_status_missing)
+        },
+        style = MaterialTheme.typography.bodySmall,
+      )
+      Text(
+        stringResource(R.string.debug_raw_replay_storage_hint),
+        style = MaterialTheme.typography.bodySmall,
+      )
+      Spacer(Modifier.height(6.dp))
+      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (ui.debugRawLoopCapturing) {
+          OutlinedButton(
+            onClick = onCancelDebugRawLoopCapture,
+            modifier = Modifier.weight(1f),
+          ) {
+            Text(stringResource(R.string.debug_raw_replay_cancel_capture))
+          }
+        } else {
+          OutlinedButton(
+            onClick = onStartDebugRawLoopCapture,
+            enabled = ui.connected && ui.eegStreamReady && !ui.debugRawLoopEnabled,
+            modifier = Modifier.weight(1f),
+          ) {
+            Text(stringResource(R.string.debug_raw_replay_capture))
+          }
+        }
+      }
     }
   }
 }
@@ -604,21 +807,42 @@ private fun GameTab(
   ui: UiState,
   onSelectGame: (GameId) -> Unit,
   onStartGame: () -> Unit,
-  onGameTap: () -> Unit,
+  onToggleGamePause: () -> Unit,
+  onStopGame: () -> Unit,
+  onSetInkGardenRefreshMode: (InkGardenRefreshMode) -> Unit,
+  onRequestNewInkGardenPicture: () -> Unit,
+  onInkGardenTelemetryChanged: (com.mordin.samathascope.scene.godot.InkGardenTelemetry) -> Unit,
 ) {
   val gameGuide = ui.selectedGameId.guide()
-  val gameCanStart = ui.sessionRunning && !ui.sessionPaused && !ui.calibrating && !ui.artefactCalibrationState.running
-  val startLabel = if (ui.gameRunning) {
-    "Restart ${ui.selectedGameId.displayName()}"
-  } else {
-    "Start ${ui.selectedGameId.displayName()}"
+  val gameCanStart = ui.sessionRunning && !ui.sessionPaused && !ui.calibrating && !ui.artefactCalibrationState.running && !ui.gameRunning
+  val canToggleGamePause = ui.gameRunning && !ui.sessionPaused && !ui.calibrating && !ui.artefactCalibrationState.running
+  val showInkGardenControls = ui.selectedGameId == GameId.INK_GARDEN
+  val canRequestInkGardenPicture = showInkGardenControls && ui.sessionRunning && ui.gameRunning
+  val pausedBySystem = ui.sessionPaused || ui.calibrating || ui.artefactCalibrationState.running || ui.selectedTab != AppTab.GAME
+  val sceneRunId = when (ui.selectedGameId) {
+    GameId.INK_GARDEN -> ui.inkGarden.pictureVersion
+    else -> ui.gameRunId
+  }
+  val primaryActionLabel = when {
+    !ui.gameRunning -> "Start ${ui.selectedGameId.displayName()}"
+    ui.gamePaused -> "Resume ${ui.selectedGameId.displayName()}"
+    else -> "Pause ${ui.selectedGameId.displayName()}"
+  }
+  var summary by remember(ui.selectedGameId, sceneRunId, ui.gameRunning) {
+    mutableStateOf(
+      when (ui.selectedGameId) {
+        GameId.INK_GARDEN -> SceneSummary("Garden richness", "${(ui.inkGarden.richness * 100f).toInt()}%")
+        else -> ui.selectedGameId.defaultSummary(ui.sceneState)
+      }
+    )
   }
   val startHelper = when {
     !ui.sessionRunning -> "Start a headset session on Dashboard first."
     ui.calibrating -> "Wait for the baseline calibration to finish."
     ui.artefactCalibrationState.running -> "Finish or skip artifact calibration before starting the game."
-    ui.sessionPaused -> "Resume the session before restarting the game."
-    ui.gameRunning -> "Running now. Press Restart whenever you want a fresh scene."
+    ui.sessionPaused -> "Resume the headset session before continuing the game."
+    ui.gamePaused -> "Paused. Press Resume to continue the current scene."
+    ui.gameRunning -> "Running now. Pause to hold the scene or Stop for a fresh restart."
     else -> "Selected only. The scene will stay still until you press Start."
   }
   Column(
@@ -629,39 +853,94 @@ private fun GameTab(
     verticalArrangement = Arrangement.spacedBy(12.dp)
   ) {
     Panel {
-      Text(ui.gameHudState.title, fontWeight = FontWeight.SemiBold)
+      Text(ui.sceneHudState.title, fontWeight = FontWeight.SemiBold)
       Spacer(Modifier.height(8.dp))
       Text(ui.selectedGameId.description(), style = MaterialTheme.typography.bodySmall)
       Spacer(Modifier.height(8.dp))
-      Button(
-        onClick = onStartGame,
-        enabled = gameCanStart,
-        modifier = Modifier.fillMaxWidth(),
-      ) {
-        Text(startLabel)
+      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Button(
+          onClick = {
+            if (ui.gameRunning) onToggleGamePause() else onStartGame()
+          },
+          enabled = if (ui.gameRunning) canToggleGamePause else gameCanStart,
+          modifier = Modifier
+            .weight(1f)
+            .testTag("game_primary_action"),
+        ) {
+          Text(primaryActionLabel)
+        }
+        OutlinedButton(
+          onClick = onStopGame,
+          enabled = ui.gameRunning,
+          modifier = Modifier.weight(1f),
+        ) {
+          Text("Stop")
+        }
       }
       Spacer(Modifier.height(6.dp))
       Text(startHelper, style = MaterialTheme.typography.bodySmall)
+      if (showInkGardenControls) {
+        Spacer(Modifier.height(10.dp))
+        Text(stringResource(R.string.ink_garden_refresh_title), fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+        Spacer(Modifier.height(6.dp))
+        InkGardenRefreshModeSelector(
+          selected = ui.inkGarden.refreshMode,
+          onSelect = onSetInkGardenRefreshMode,
+        )
+        Spacer(Modifier.height(6.dp))
+        OutlinedButton(
+          onClick = onRequestNewInkGardenPicture,
+          enabled = canRequestInkGardenPicture,
+          modifier = Modifier.fillMaxWidth(),
+        ) {
+          Text(stringResource(R.string.ink_garden_new_picture))
+        }
+        Text(
+          text = stringResource(
+            if (ui.inkGarden.refreshMode == InkGardenRefreshMode.AUTO) {
+              R.string.ink_garden_refresh_auto_helper
+            } else {
+              R.string.ink_garden_refresh_manual_helper
+            }
+          ),
+          style = MaterialTheme.typography.bodySmall,
+        )
+      }
       Spacer(Modifier.height(8.dp))
-      SelectedGameScene(
-        ui = ui,
-        onGameTap = onGameTap,
+      GameSceneHost(
+        gameId = ui.selectedGameId,
+        runId = sceneRunId,
+        sceneState = ui.sceneState,
+        running = ui.gameRunning,
+        paused = ui.gamePaused || pausedBySystem,
+        inputEnabled = ui.sceneHudState.inputEnabled,
+        skyTowerSettings = ui.skyTowerSettings,
+        inkGardenCompositionSeed = ui.inkGarden.compositionSeed,
+        onSummaryChanged = { summary = it },
+        onInkGardenTelemetryChanged = onInkGardenTelemetryChanged,
       )
       Spacer(Modifier.height(8.dp))
-      HudRow(label = ui.gameHudState.summaryLabel, value = ui.gameHudState.summaryValue)
-      HudRow(label = "Stability", value = "${ui.gameHudState.stabilityPercent}%")
-      HudRow(label = "Drift", value = "${ui.gameHudState.driftPercent}%")
-      HudRow(label = "Artefact noise", value = "${ui.gameHudState.noisePercent}%")
-      HudRow(label = "Fatigue gate", value = "${ui.gameHudState.fatiguePercent}%")
-      HudRow(label = "Correction pulse", value = "${ui.gameHudState.correctionPercent}%")
-      HudRow(label = stringResource(R.string.game_hud_state), value = stateLabelLabel(ui.gameHudState.stateLabel))
-      HudRow(label = stringResource(R.string.game_hud_signal), value = "${ui.gameHudState.poorSignal}")
-      HudRow(label = stringResource(R.string.game_hud_elapsed), value = "${ui.gameHudState.elapsedSeconds}s")
-      if (shouldShowBatteryRow(ui.gameHudState.batteryPercent)) {
-        HudRow(label = stringResource(R.string.game_hud_battery), value = "${ui.gameHudState.batteryPercent}%")
+      HudRow(label = summary.label, value = summary.value)
+      val motifName = ui.inkGarden.motifName
+      if (showInkGardenControls && !motifName.isNullOrBlank()) {
+        HudRow(
+          label = stringResource(R.string.ink_garden_motif),
+          value = motifName.replace('_', ' '),
+        )
+      }
+      HudRow(label = "Calmness", value = "${ui.sceneHudState.calmnessPercent}%")
+      HudRow(label = "Focus", value = "${ui.sceneHudState.focusPercent}%")
+      HudRow(label = "Stability", value = "${ui.sceneHudState.stabilityPercent}%")
+      HudRow(label = "Intensity", value = "${ui.sceneHudState.intensityPercent}%")
+      HudRow(label = "Drift", value = "${ui.sceneHudState.driftSignedPercent}%")
+      HudRow(label = stringResource(R.string.game_hud_state), value = stateLabelLabel(ui.sceneHudState.stateLabel))
+      HudRow(label = stringResource(R.string.game_hud_signal), value = "${ui.sceneHudState.poorSignal}")
+      HudRow(label = stringResource(R.string.game_hud_elapsed), value = "${ui.sceneHudState.elapsedSeconds}s")
+      if (shouldShowBatteryRow(ui.sceneHudState.batteryPercent)) {
+        HudRow(label = stringResource(R.string.game_hud_battery), value = "${ui.sceneHudState.batteryPercent}%")
       }
       Spacer(Modifier.height(4.dp))
-      Text(ui.gameHudState.inputHint, style = MaterialTheme.typography.bodySmall)
+      Text(ui.sceneHudState.inputHint, style = MaterialTheme.typography.bodySmall)
     }
 
     Panel {
@@ -683,6 +962,38 @@ private fun GameTab(
   }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun InkGardenRefreshModeSelector(
+  selected: InkGardenRefreshMode,
+  onSelect: (InkGardenRefreshMode) -> Unit,
+) {
+  FlowRow(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.spacedBy(8.dp),
+    verticalArrangement = Arrangement.spacedBy(8.dp),
+  ) {
+    InkGardenRefreshMode.entries.forEach { mode ->
+      OutlinedButton(
+        onClick = { onSelect(mode) },
+        border = BorderStroke(
+          width = if (selected == mode) 2.dp else 1.dp,
+          color = if (selected == mode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+        ),
+      ) {
+        Text(
+          text = stringResource(
+            when (mode) {
+              InkGardenRefreshMode.AUTO -> R.string.ink_garden_refresh_mode_auto
+              InkGardenRefreshMode.MANUAL -> R.string.ink_garden_refresh_mode_manual
+            }
+          )
+        )
+      }
+    }
+  }
+}
+
 @Composable
 private fun DiagnosticsSection(ui: UiState) {
   Panel {
@@ -692,6 +1003,9 @@ private fun DiagnosticsSection(ui: UiState) {
     HudRow(label = stringResource(R.string.telemetry_poor_signal), value = "${ui.poorSignal}")
     HudRow(label = stringResource(R.string.telemetry_samples_per_second), value = "${ui.samplesPerSecond.roundToInt()}")
     HudRow(label = stringResource(R.string.telemetry_stall_ms), value = "${ui.streamStallMs} ms")
+    if (shouldShowBatteryRow(ui.batteryPercent)) {
+      HudRow(label = stringResource(R.string.game_hud_battery), value = "${ui.batteryPercent}%")
+    }
 
     Spacer(Modifier.height(8.dp))
     MetricBar(label = MetricGlossary.entryFor(PlotType.SETTLEDNESS).plainName, value = ui.settledness)
@@ -853,7 +1167,10 @@ private fun ArtefactCalibrationCallout(
           TextButton(onClick = onLaterArtefactCalibration) {
             Text(stringResource(R.string.artifact_calibration_later))
           }
-          TextButton(onClick = onSkipArtefactCalibration) {
+          TextButton(
+            onClick = onSkipArtefactCalibration,
+            modifier = Modifier.testTag("dashboard_skip_artefact_calibration"),
+          ) {
             Text(stringResource(R.string.artifact_calibration_skip))
           }
         }
@@ -925,11 +1242,22 @@ private fun ValueText(text: String) {
 private fun LabeledCheckbox(
   checked: Boolean,
   label: String,
+  enabled: Boolean = true,
+  checkboxModifier: Modifier = Modifier,
   onCheckedChange: (Boolean) -> Unit,
 ) {
   Row(verticalAlignment = Alignment.CenterVertically) {
-    Checkbox(checked = checked, onCheckedChange = onCheckedChange)
-    Text(label, style = MaterialTheme.typography.bodySmall)
+    Checkbox(
+      checked = checked,
+      onCheckedChange = onCheckedChange,
+      enabled = enabled,
+      modifier = checkboxModifier,
+    )
+    Text(
+      label,
+      style = MaterialTheme.typography.bodySmall,
+      color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+    )
   }
 }
 
@@ -1137,6 +1465,28 @@ private fun stateLabelLabel(state: StateLabel): String {
   }
 }
 
+private fun eegStreamStatusLabel(status: EegStreamStatus): Int {
+  return when (status) {
+    EegStreamStatus.DISCONNECTED -> R.string.eeg_stream_disconnected
+    EegStreamStatus.WAITING_FOR_RAW -> R.string.eeg_stream_waiting_for_raw
+    EegStreamStatus.CONFIRMING -> R.string.eeg_stream_confirming
+    EegStreamStatus.LIVE -> R.string.eeg_stream_live
+    EegStreamStatus.DEBUG_REPLAY -> R.string.eeg_stream_debug_replay
+    EegStreamStatus.STALLED -> R.string.eeg_stream_stalled
+  }
+}
+
+private fun headsetStatusHelperText(status: EegStreamStatus): Int {
+  return when (status) {
+    EegStreamStatus.DISCONNECTED -> R.string.headset_status_helper_disconnected
+    EegStreamStatus.WAITING_FOR_RAW -> R.string.headset_status_helper_waiting_for_raw
+    EegStreamStatus.CONFIRMING -> R.string.headset_status_helper_confirming
+    EegStreamStatus.LIVE -> R.string.headset_status_helper_live
+    EegStreamStatus.DEBUG_REPLAY -> R.string.headset_status_helper_debug_replay
+    EegStreamStatus.STALLED -> R.string.headset_status_helper_stalled
+  }
+}
+
 @Composable
 private fun MetricBar(label: String, value: Float, emphasise: Boolean = false) {
   Column {
@@ -1185,7 +1535,7 @@ private fun WaveformPlot(
         var carry = 0f
         detectHorizontalDragGestures { _, dragAmount ->
           carry += dragAmount
-          val seconds = (-carry / 18f).toInt()
+          val seconds = (carry / 18f).toInt()
           if (seconds != 0) {
             onPan(seconds)
             carry += seconds * 18f
@@ -1235,7 +1585,7 @@ private fun MultiMetricPlot(
         var carry = 0f
         detectHorizontalDragGestures { _, dragAmount ->
           carry += dragAmount
-          val seconds = (-carry / 18f).toInt()
+          val seconds = (carry / 18f).toInt()
           if (seconds != 0) {
             onPan(seconds)
             carry += seconds * 18f
@@ -1366,31 +1716,70 @@ private fun LanternScene(altitude: Float, glow: Float) {
 }
 
 @Composable
-private fun WindowSecondsDropdown(
+private fun WindowSecondsSlider(
   selectedSeconds: Int,
   options: List<Int>,
   onSelected: (Int) -> Unit,
 ) {
-  var expanded by remember { mutableStateOf(false) }
+  val selectedIndex = options.indexOf(selectedSeconds).coerceAtLeast(0)
 
-  Row(verticalAlignment = Alignment.CenterVertically) {
+  Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
     Text(stringResource(R.string.plot_window_label), style = MaterialTheme.typography.bodySmall)
-    Spacer(Modifier.width(8.dp))
-    Box {
-      OutlinedButton(onClick = { expanded = true }) {
-        Text(stringResource(R.string.seconds_value, selectedSeconds))
-      }
-      DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-        options.forEach { seconds ->
-          DropdownMenuItem(
-            text = { Text(stringResource(R.string.seconds_value, seconds)) },
-            onClick = {
-              onSelected(seconds)
-              expanded = false
-            }
-          )
-        }
+    Text(stringResource(R.string.seconds_value, selectedSeconds), style = MaterialTheme.typography.labelMedium)
+    Slider(
+      value = selectedIndex.toFloat(),
+      onValueChange = { value ->
+        val nextIndex = value.roundToInt().coerceIn(0, options.lastIndex)
+        onSelected(options[nextIndex])
+      },
+      valueRange = 0f..options.lastIndex.toFloat(),
+      steps = (options.size - 2).coerceAtLeast(0),
+    )
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+      options.forEach { seconds ->
+        Text(
+          text = stringResource(R.string.seconds_value, seconds),
+          style = MaterialTheme.typography.labelSmall,
+        )
       }
     }
+  }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun NoiseColorSelector(
+  selected: NoiseColor,
+  onSelect: (NoiseColor) -> Unit,
+) {
+  FlowRow(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.spacedBy(8.dp),
+    verticalArrangement = Arrangement.spacedBy(8.dp),
+  ) {
+    NoiseColor.entries.forEach { option ->
+      OutlinedButton(
+        onClick = { onSelect(option) },
+        border = BorderStroke(
+          width = if (selected == option) 2.dp else 1.dp,
+          color = if (selected == option) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+        ),
+      ) {
+        Text(noiseColorLabel(option))
+      }
+    }
+  }
+}
+
+@Composable
+private fun noiseColorLabel(color: NoiseColor): String {
+  return when (color) {
+    NoiseColor.WHITE -> stringResource(R.string.noise_color_white)
+    NoiseColor.PINK -> stringResource(R.string.noise_color_pink)
+    NoiseColor.BROWN -> stringResource(R.string.noise_color_brown)
+    NoiseColor.BLUE -> stringResource(R.string.noise_color_blue)
   }
 }

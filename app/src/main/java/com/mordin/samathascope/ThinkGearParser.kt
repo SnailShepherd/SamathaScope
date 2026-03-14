@@ -13,6 +13,7 @@ package com.mordin.samathascope
  * - else: LENGTH byte, then that many value bytes
  *
  * Codes we care about:
+ * 0x01 BATTERY (single byte)
  * 0x02 POOR_SIGNAL (single byte)
  * 0x04 ATTENTION (single byte)
  * 0x05 MEDITATION (single byte)
@@ -88,6 +89,7 @@ class ThinkGearParser {
         val v = buf[i].toInt() and 0xFF
         i++
         when (code) {
+          0x01 -> onData?.invoke(ThinkGearData.Battery(v))
           0x02 -> onData?.invoke(ThinkGearData.PoorSignal(v))
           0x04 -> onData?.invoke(ThinkGearData.Attention(v))
           0x05 -> onData?.invoke(ThinkGearData.Meditation(v))

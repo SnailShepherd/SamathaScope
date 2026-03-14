@@ -38,6 +38,8 @@ class PlotSettingsStoreTest {
 
     override fun getBoolean(key: String, defaultValue: Boolean): Boolean = values[key] as? Boolean ?: defaultValue
 
+    override fun getString(key: String, defaultValue: String): String = values[key] as? String ?: defaultValue
+
     override fun putInt(key: String, value: Int) {
       values[key] = value
     }
@@ -47,6 +49,10 @@ class PlotSettingsStoreTest {
     }
 
     override fun putBoolean(key: String, value: Boolean) {
+      values[key] = value
+    }
+
+    override fun putString(key: String, value: String) {
       values[key] = value
     }
 

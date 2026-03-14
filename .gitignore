@@ -4,6 +4,7 @@
 
 # Gradle / Kotlin build state
 .gradle/
+.gradle-user-home/
 .kotlin/
 build/
 */build/
@@ -15,6 +16,7 @@ local.properties
 captures/
 .externalNativeBuild/
 .cxx/
+tmp/
 
 # OS/editor noise
 .DS_Store

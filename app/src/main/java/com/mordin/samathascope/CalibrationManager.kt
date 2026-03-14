@@ -47,7 +47,7 @@ class CalibrationManager(
   private val adaptiveWindowSeconds: Int = 600,
   private val nowMs: () -> Long = { System.currentTimeMillis() },
 ) {
-  private var startedAtMs: Long = 0L
+  private var startedAtMs: Long = UNINITIALIZED_START_MS
   private val samples = ArrayList<CalibrationFeatureSample>(calibrationSeconds * pointsPerSecond)
   private var selectedCalibrationSamples: List<CalibrationFeatureSample> = emptyList()
 
@@ -64,13 +64,13 @@ class CalibrationManager(
   }
 
   fun addSample(features: EegFeatures, quality: QualityMetrics) {
-    if (startedAtMs == 0L) startedAtMs = nowMs()
+    if (startedAtMs == UNINITIALIZED_START_MS) startedAtMs = nowMs()
     if (isDone()) return
     samples += CalibrationFeatureSample(features = features, quality = quality)
   }
 
   fun remainingSeconds(): Int {
-    if (startedAtMs == 0L) return calibrationSeconds
+    if (startedAtMs == UNINITIALIZED_START_MS) return calibrationSeconds
     val elapsed = ((nowMs() - startedAtMs) / 1000L).toInt()
     return (calibrationSeconds - elapsed).coerceAtLeast(0)
   }
@@ -197,5 +197,9 @@ class CalibrationManager(
       { it.features.clipFraction },
       { it.features.maxGapMs },
     )
+  }
+
+  private companion object {
+    const val UNINITIALIZED_START_MS = -1L
   }
 }

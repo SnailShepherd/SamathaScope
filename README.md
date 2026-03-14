@@ -2,9 +2,9 @@
 
 SamathaScope is an Android neurofeedback app for MindWave Mobile 2. It uses a personalised frontal-state classifier instead of the retired alpha-heavy score and tries to reward relaxed alertness rather than quiet drowsiness.
 
-Current app version: `0.6` (`versionCode 6`)
+Current app version: `0.7` (`versionCode 7`)
 
-## What v0.6 includes
+## What v0.7 includes
 
 - 4-tab UI: `Dashboard`, `Settings`, `Game`, `Learn`
 - Session card source dropdown for dashboard audio: `Meditation Proxy`, `Settledness`, or `Alertness`
@@ -14,7 +14,7 @@ Current app version: `0.6` (`versionCode 6`)
 - Optional artefact calibration after the clean baseline
 - Decoupled game audio and dashboard audio with smoother tab crossfades
 - Four neurofeedback scenes:
-  - `Sky Tower` with one tap per release and rigid settling
+  - `Sky Tower` with composite painterly stones, a custom contained stack simulator, springy wobble tied to artefact score, frictional grip, and faster drops
   - `Ink Garden` with watercolor-style pigment spread and splatter
   - `Fire Keeper`
   - `Scriptorium`

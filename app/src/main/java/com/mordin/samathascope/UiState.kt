@@ -1,5 +1,9 @@
 package com.mordin.samathascope
 
+import com.mordin.samathascope.scene.SceneHudState
+import com.mordin.samathascope.scene.SceneState
+import com.mordin.samathascope.scene.tower.SkyTowerSettings
+
 enum class PlotType {
   RAW,
   MEDITATION_PROXY,
@@ -20,6 +24,15 @@ enum class AppTab {
   SETTINGS,
   GAME,
   LEARN,
+}
+
+enum class EegStreamStatus {
+  DISCONNECTED,
+  WAITING_FOR_RAW,
+  CONFIRMING,
+  LIVE,
+  DEBUG_REPLAY,
+  STALLED,
 }
 
 enum class CalibrationPhase {
@@ -66,7 +79,14 @@ data class UiState(
   val btPermissionGranted: Boolean = false,
   val bondedDevices: List<BondedDevice> = emptyList(),
   val selectedDeviceMac: String? = null,
+  val headsetConnecting: Boolean = false,
   val connected: Boolean = false,
+  val eegStreamStatus: EegStreamStatus = EegStreamStatus.DISCONNECTED,
+  val eegStreamReady: Boolean = false,
+  val debugRawLoopAvailable: Boolean = false,
+  val debugRawLoopEnabled: Boolean = false,
+  val debugRawLoopCapturing: Boolean = false,
+  val debugRawLoopCapturedSeconds: Int = 0,
 
   val poorSignal: Int = 255,
   val attention: Int = 0,
@@ -124,6 +144,7 @@ data class UiState(
 
   val audioEnabled: Boolean = true,
   val invertReward: Boolean = false,
+  val noiseColor: NoiseColor = NoiseColor.WHITE,
   val gamma: Float = 1.6f,
   val gMinDb: Int = -30,
   val gMaxDb: Int = -3,
@@ -138,10 +159,13 @@ data class UiState(
 
   val selectedGameId: GameId = GameId.SKY_TOWER,
   val gameRunning: Boolean = false,
-  val gameSignals: GameSignalSnapshot = GameSignalSnapshot(),
-  val gameRuntimeState: GameRuntimeState = defaultGameRuntimeState(),
+  val gamePaused: Boolean = false,
+  val gameRunId: Int = 0,
+  val inkGarden: InkGardenUiState = InkGardenUiState(),
+  val skyTowerSettings: SkyTowerSettings = SkyTowerSettings(),
+  val sceneState: SceneState = SceneState(),
   val gameAudioState: GameAudioState = GameAudioState(muted = true),
-  val gameHudState: GameHudState = defaultGameHudState(),
+  val sceneHudState: SceneHudState = SceneHudState(),
 )
 
 fun defaultVisibleMetrics(): Set<PlotType> = linkedSetOf(

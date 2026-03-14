@@ -31,8 +31,8 @@ fun GameId.displayName(): String {
 
 fun GameId.description(): String {
   return when (this) {
-    GameId.SKY_TOWER -> "Release one carrier block at a time and let calm settling build a stable tower."
-    GameId.INK_GARDEN -> "Pigment blooms across wet paper; your EEG shapes pooling, bleed, and splatter."
+    GameId.SKY_TOWER -> "Release one composite stone at a time and build a springy tower inside a contained playfield while friction and wobble fight for balance."
+    GameId.INK_GARDEN -> "A sumi-e brush painting unfolds on white paper; your EEG shapes ink confidence, wash, and restraint."
     GameId.FIRE_KEEPER -> "A passive campfire scene shaped by steadiness, drift, correction, and fatigue."
     GameId.SCRIPTORIUM -> "A passive manuscript that writes itself more clearly when the state is stable."
   }
@@ -40,7 +40,7 @@ fun GameId.description(): String {
 
 fun GameId.inputHint(): String {
   return when (this) {
-    GameId.SKY_TOWER -> "Tap once to release the carrier block. Wait for it to settle before the next one."
+    GameId.SKY_TOWER -> "Tap once to drop the hovering stone. Wait for it to land and calm down before the next one."
     else -> "Passive scene: settle, stay awake, and let the scene respond."
   }
 }
@@ -52,22 +52,24 @@ fun GameId.guide(): GameGuide {
     GameId.SKY_TOWER -> GameGuide(
       title = "Sky Tower guide",
       lines = listOf(
-        "One tap releases one carrier block. There is no constant tapping loop anymore.",
-        "Settledness improves damping, steadier landings, and post-impact recovery.",
-        "Mind Wandering adds drift, uneven sweep, and sideways pressure before and after release.",
-        "Artefact Score becomes short physical jolts and tremors in the stack.",
-        "Effortful Focus adds a brief rescue window that nudges a shaky release back toward coherence.",
+        "One tap releases one composite stone. Wait for the carrier to return before tapping again.",
+        "The custom stack simulator only locks a stone in when it actually lands on the platform or another stone.",
+        "Settledness improves frictional grip, damping, and the way the tower recovers after each landing.",
+        "Mind Wandering pushes the carrier off line and leans the stack sideways before and after release.",
+        "Artefact Score makes the whole tower springier, wobblier, and slower to calm down.",
+        "Invisible side walls keep misses inside the playfield instead of letting stones drift into the HUD.",
+        "Effortful Focus gives a brief rescue pulse that helps a shaky stone catch a safer landing.",
       ),
     )
 
     GameId.INK_GARDEN -> GameGuide(
       title = "Ink Garden guide",
       lines = listOf(
-        "This scene is passive after Start: pigment seeds land on wet paper and spread on their own.",
-        "Settledness produces cleaner pooling, smoother bleed, and darker coherent forms.",
-        "Mind Wandering sends pigment sideways into wandering channels and tangled bleed paths.",
-        "Artefact Score adds splatter, granulation, and ragged feathering.",
-        "Effortful Focus creates brief re-cohesion blooms that gather wandering pigment back together.",
+        "This scene is passive after Start: one sumi-e composition reveals itself stroke by stroke.",
+        "Settledness slows the pacing and leaves more breathing room, cleaner wash, and calmer negative space.",
+        "Mind Wandering bends the brush path sideways and loosens branch confidence.",
+        "Artefact Score roughens the ink edge, adds dry-brush breakup, and makes joints less composed.",
+        "Effortful Focus briefly sharpens taper, darkens pooled ink, and helps the composition gather itself.",
       ),
     )
 
@@ -117,7 +119,7 @@ data class GameSignalSnapshot(
 data class GameHudState(
   val title: String = GameId.SKY_TOWER.displayName(),
   val summaryLabel: String = "Tower height",
-  val summaryValue: String = "0 blocks",
+  val summaryValue: String = "0 stones",
   val inputHint: String = GameId.SKY_TOWER.startHint(),
   val inputEnabled: Boolean = false,
   val stabilityPercent: Int = 0,

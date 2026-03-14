@@ -11,14 +11,30 @@ class NoiseAudioEngine(
   private val sampleRate: Int = 48_000,
   private val frameSize: Int = 480,
 ) {
+  private data class NoiseState(
+    var brown: Float = 0f,
+    var lastWhite: Float = 0f,
+    var blueMemory: Float = 0f,
+    var pink0: Float = 0f,
+    var pink1: Float = 0f,
+    var pink2: Float = 0f,
+    var pink3: Float = 0f,
+    var pink4: Float = 0f,
+    var pink5: Float = 0f,
+    var pink6: Float = 0f,
+  )
+
   private var track: AudioTrack? = null
   private var thread: Thread? = null
+  private val leftNoise = NoiseState()
+  private val rightNoise = NoiseState()
 
   @Volatile private var running = false
   @Volatile private var muted = true
 
   @Volatile private var targetFeedback: Float = 0f
   @Volatile private var invertReward: Boolean = false
+  @Volatile private var noiseColor: NoiseColor = NoiseColor.WHITE
   @Volatile private var gamma: Float = 1.6f
   @Volatile private var gMinDb: Int = -30
   @Volatile private var gMaxDb: Int = -3
@@ -94,12 +110,14 @@ class NoiseAudioEngine(
   fun update(
     feedbackValue: Float,
     invertReward: Boolean,
+    noiseColor: NoiseColor,
     gamma: Float,
     gMinDb: Int,
     gMaxDb: Int,
   ) {
     targetFeedback = feedbackValue.coerceIn(0f, 1f)
     this.invertReward = invertReward
+    this.noiseColor = noiseColor
     this.gamma = gamma.coerceIn(0.6f, 3.0f)
     this.gMinDb = gMinDb
     this.gMaxDb = gMaxDb
@@ -138,8 +156,8 @@ class NoiseAudioEngine(
 
       var cursor = 0
       repeat(frameSize) {
-        val left = (Random.nextFloat() * 2f - 1f) * baseAmp * master
-        val right = (Random.nextFloat() * 2f - 1f) * baseAmp * master
+        val left = sampleNoise(leftNoise, noiseColor) * baseAmp * master
+        val right = sampleNoise(rightNoise, noiseColor) * baseAmp * master
         buffer[cursor++] = floatToPcm16(left)
         buffer[cursor++] = floatToPcm16(right)
       }
@@ -154,5 +172,48 @@ class NoiseAudioEngine(
 
   private fun floatToPcm16(value: Float): Short {
     return (value.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
+  }
+
+  private fun sampleNoise(state: NoiseState, color: NoiseColor): Float {
+    val white = (Random.nextFloat() * 2f) - 1f
+    return when (color) {
+      NoiseColor.WHITE -> white
+      NoiseColor.PINK -> samplePink(state, white)
+      NoiseColor.BROWN -> sampleBrown(state, white)
+      NoiseColor.BLUE -> sampleBlue(state, white)
+    }.coerceIn(-1f, 1f)
+  }
+
+  private fun samplePink(state: NoiseState, white: Float): Float {
+    state.pink0 = (0.99886f * state.pink0) + (white * 0.0555179f)
+    state.pink1 = (0.99332f * state.pink1) + (white * 0.0750759f)
+    state.pink2 = (0.96900f * state.pink2) + (white * 0.1538520f)
+    state.pink3 = (0.86650f * state.pink3) + (white * 0.3104856f)
+    state.pink4 = (0.55000f * state.pink4) + (white * 0.5329522f)
+    state.pink5 = (-0.7616f * state.pink5) - (white * 0.0168980f)
+    val pink = (
+      state.pink0 +
+        state.pink1 +
+        state.pink2 +
+        state.pink3 +
+        state.pink4 +
+        state.pink5 +
+        state.pink6 +
+        (white * 0.5362f)
+      ) * 0.18f
+    state.pink6 = white * 0.115926f
+    return pink
+  }
+
+  private fun sampleBrown(state: NoiseState, white: Float): Float {
+    state.brown = ((state.brown + (white * 0.08f)) * 0.985f).coerceIn(-1.2f, 1.2f)
+    return (state.brown * 2.6f).coerceIn(-1f, 1f)
+  }
+
+  private fun sampleBlue(state: NoiseState, white: Float): Float {
+    val differentiated = white - state.lastWhite
+    state.lastWhite = white
+    state.blueMemory = (state.blueMemory * 0.22f) + differentiated
+    return (state.blueMemory * 1.6f).coerceIn(-1f, 1f)
   }
 }

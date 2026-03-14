@@ -15,7 +15,10 @@
       android:theme="@style/Theme.SamathaScope">
     <activity
         android:name=".MainActivity"
-        android:exported="true">
+        android:configChanges="density|fontScale|keyboard|keyboardHidden|layoutDirection|locale|mcc|mnc|navigation|orientation|screenLayout|screenSize|smallestScreenSize|touchscreen|uiMode"
+        android:exported="true"
+        android:hardwareAccelerated="true"
+        android:screenOrientation="portrait">
       <intent-filter>
         <action android:name="android.intent.action.MAIN" />
         <category android:name="android.intent.category.LAUNCHER" />

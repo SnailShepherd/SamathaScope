@@ -1,6 +1,7 @@
 package com.mordin.samathascope
 
 sealed class ThinkGearData {
+  data class Battery(val value: Int) : ThinkGearData()
   data class PoorSignal(val value: Int) : ThinkGearData()
   data class Attention(val value: Int) : ThinkGearData()
   data class Meditation(val value: Int) : ThinkGearData()
