@@ -76,6 +76,14 @@
 
   <string name="section_diagnostics">Diagnostics</string>
   <string name="state_label">State</string>
+  <string name="reliability_label">Signal reliability: %1$s (%2$d%%)</string>
+  <string name="reliability_state_high">High confidence</string>
+  <string name="reliability_state_medium">Moderate confidence</string>
+  <string name="reliability_state_low">Low confidence</string>
+  <string name="reliability_message_contaminated">This window is contaminated, so reward and state labels are intentionally conservative.</string>
+  <string name="reliability_message_low">Recent input quality is weak, so state interpretation may be unstable.</string>
+  <string name="reliability_message_medium">Input quality is usable but mixed; treat short-term swings with caution.</string>
+  <string name="reliability_message_high">Input quality is strong enough for educational interpretation and gameplay feedback.</string>
   <string name="metric_settledness">Settledness</string>
   <string name="metric_control">Control</string>
   <string name="metric_alertness">Alertness</string>
@@ -153,6 +161,19 @@
   <string name="ink_garden_refresh_auto_helper">Auto mode starts a fresh picture after richness reaches 70%% and then stops improving for 5 seconds.</string>
   <string name="ink_garden_refresh_manual_helper">Manual mode waits for the New picture button, so the current painting stays on paper until you choose the next one.</string>
   <string name="ink_garden_motif">Motif</string>
+  <string name="ink_garden_brush_preset">Brush preset</string>
+  <string name="ink_garden_settings_title">Ink Garden</string>
+  <string name="ink_garden_settings_helper">Brush presets stay automatic, but you can tune whether optional magical overlays appear and how strong an EEG surge must be before they activate.</string>
+  <string name="ink_garden_enhanced_fx_label">Enable enhanced ink FX</string>
+  <string name="ink_garden_enhanced_fx_helper">Off by default for performance safety. When enabled, Ink Garden can add ghost trails and gold dust accents during stronger changes in focus or intensity.</string>
+  <string name="ink_garden_ghost_trails_label">Ghost trails</string>
+  <string name="ink_garden_gold_dust_label">Gold dust motes</string>
+  <string name="ink_garden_effect_trigger_threshold">FX trigger threshold: %1$d%%</string>
+  <string name="ink_garden_effect_strength">FX strength: %1$d%%</string>
+  <string name="feature_rollout_disabled">%1$s is currently disabled by rollout flag.</string>
+
+  <string name="sky_tower_collapse_label">Collapse on 3 consecutive misses</string>
+  <string name="sky_tower_collapse_helper">When enabled, three missed landings in a row trigger a collapse cascade that removes settled stones one by one before the next sequence begins.</string>
 
   <string name="settings_data_title">Data and filters</string>
   <string name="record_local">Record raw data and feature values locally</string>
@@ -200,6 +221,16 @@
   <string name="learn_caveat_body">This is a non-medical training aid built around one dry frontal electrode at FP1 with an ear reference. It cannot infer whole-brain state, connectivity, source localisation, or meditative attainment.</string>
   <string name="learn_wellbeing_title">Wellbeing note</string>
   <string name="learn_wellbeing_body">If you feel discomfort, fatigue, or stress during sessions, pause and recover before continuing. Quietness alone is not the goal; stable, alert practice is.</string>
+  <string name="learn_mode_title">Learn focus</string>
+  <string name="learn_mode_metrics">How metrics work</string>
+  <string name="learn_mode_foundations">Foundations</string>
+  <string name="learn_how_metrics_title">Metric deep dive</string>
+  <string name="learn_how_metrics_body">Choose any metric to see the formula, terms, and practical interpretation used by the live model. This section is for educational transparency, not diagnosis.</string>
+  <string name="learn_select_metric_title">Choose a metric</string>
+  <string name="learn_metric_details_title">%1$s (%2$s)</string>
+  <string name="learn_eeg_assumptions_title">EEG model assumptions</string>
+  <string name="learn_eeg_assumptions_body">All computed metrics share a common set of constraints: one dry frontal electrode (FP1), an ear reference, 512 Hz sampling through the MindWave Mobile 2 headset, 8-second analysis windows, and a personal calibration session conducted under the same conditions. Departing from any of these conditions reduces the reliability of all derived metrics equally.</string>
+  <string name="learn_interpretive_note_title">Interpretation limits</string>
   <string name="learn_sources_title">Sources</string>
   <string name="learn_sources_intro">The app includes short offline summaries and optional links for deeper reading.</string>
   <string name="learn_source_1">AN 11.2 (canonical reference)</string>

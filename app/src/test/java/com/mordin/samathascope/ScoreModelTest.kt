@@ -6,7 +6,7 @@ import org.junit.Test
 class ScoreModelTest {
 
   @Test
-  fun quality_ignoresLineNoiseInTotalArtefact() {
+  fun quality_includesLineNoiseInTotalArtefact() {
     val scorer = ScoreModel()
     val baseFeatures = feature(lineNoiseRatio = 0.02f)
     val highLineFeatures = feature(lineNoiseRatio = 0.40f)
@@ -15,7 +15,7 @@ class ScoreModelTest {
     val highLine = scorer.quality(poorSignal = 10, features = highLineFeatures)
 
     assertThat(highLine.lineNoise).isGreaterThan(base.lineNoise)
-    assertThat(highLine.artefactScore).isWithin(1e-6f).of(base.artefactScore)
+    assertThat(highLine.artefactScore).isGreaterThan(base.artefactScore)
   }
 
   @Test

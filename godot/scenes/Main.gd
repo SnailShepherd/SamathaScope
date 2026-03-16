@@ -2,6 +2,7 @@ extends Node2D
 
 const INK_GARDEN_SCENE_PATH := "res://scenes/ink_garden/InkGarden.tscn"
 const FIRE_SCENE_PATH := "res://scenes/fire/Fire.tscn"
+const PAYLOAD_APPLY_INTERVAL_SECONDS := 1.0 / 30.0
 
 @onready var scene_container: Node = $SceneContainer
 
@@ -9,16 +10,34 @@ var _bridge = null
 var _loaded_scene_id := ""
 var _loaded_scene_version := -1
 var _reported_missing_bridge := false
+var _payload_apply_accumulator := 0.0
+var _last_payload := {}
 
 func _ready() -> void:
 	if Engine.has_singleton("SamathaBridge"):
 		_bridge = Engine.get_singleton("SamathaBridge")
-	_apply_payload(_read_payload())
+	_last_payload = _read_payload()
+	_apply_payload(_last_payload)
 
 func _process(delta: float) -> void:
 	if _bridge == null and _allow_preview_driver():
 		ScenePreviewDriver.advance(delta)
-	_apply_payload(_read_payload())
+	_payload_apply_accumulator += delta
+	var payload := _read_payload()
+	if payload.is_empty():
+		return
+	var next_scene_id: String = payload.get("scene_id", "ink_garden")
+	var next_version: int = int(payload.get("version", 0))
+	if next_scene_id != _loaded_scene_id or next_version != _loaded_scene_version:
+		_last_payload = payload
+		_payload_apply_accumulator = 0.0
+		_apply_payload(payload)
+		return
+	_last_payload = payload
+	if _payload_apply_accumulator < PAYLOAD_APPLY_INTERVAL_SECONDS:
+		return
+	_payload_apply_accumulator = 0.0
+	_apply_payload(_last_payload)
 
 func _read_payload() -> Dictionary:
 	if _bridge != null:

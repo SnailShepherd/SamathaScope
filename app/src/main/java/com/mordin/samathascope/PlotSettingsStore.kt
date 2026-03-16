@@ -89,6 +89,7 @@ class SkyTowerSettingsStore(private val store: KeyValueStore) {
       baseWidthScale = store.getFloat(KEY_BASE_WIDTH_SCALE, SkyTowerSettings.DEFAULT_BASE_WIDTH_SCALE),
       carrierSpeedMultiplier = store.getFloat(KEY_CARRIER_SPEED_MULTIPLIER, SkyTowerSettings.DEFAULT_CARRIER_SPEED_MULTIPLIER),
       irregularity = store.getFloat(KEY_IRREGULARITY, SkyTowerSettings.DEFAULT_IRREGULARITY),
+      collapseEnabled = store.getBoolean(KEY_COLLAPSE_ENABLED, SkyTowerSettings.DEFAULT_COLLAPSE_ENABLED),
     ).clamped()
   }
 
@@ -97,6 +98,7 @@ class SkyTowerSettingsStore(private val store: KeyValueStore) {
     store.putFloat(KEY_BASE_WIDTH_SCALE, clamped.baseWidthScale)
     store.putFloat(KEY_CARRIER_SPEED_MULTIPLIER, clamped.carrierSpeedMultiplier)
     store.putFloat(KEY_IRREGULARITY, clamped.irregularity)
+    store.putBoolean(KEY_COLLAPSE_ENABLED, clamped.collapseEnabled)
     store.apply()
   }
 
@@ -104,6 +106,7 @@ class SkyTowerSettingsStore(private val store: KeyValueStore) {
     const val KEY_BASE_WIDTH_SCALE = "sky_tower_base_width_scale"
     const val KEY_CARRIER_SPEED_MULTIPLIER = "sky_tower_carrier_speed_multiplier"
     const val KEY_IRREGULARITY = "sky_tower_irregularity"
+    const val KEY_COLLAPSE_ENABLED = "sky_tower_collapse_enabled"
   }
 }
 

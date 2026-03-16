@@ -38,7 +38,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   private val skyTowerSettingsStore = createSkyTowerSettingsStore(ctx)
   private val noiseColorStore = createNoiseColorStore(ctx)
   private val inkGardenRefreshModeStore = createInkGardenRefreshModeStore(ctx)
+  private val inkGardenSceneSettingsStore = createInkGardenSceneSettingsStore(ctx)
   private val debugRawLoopStore = createDebugRawLoopStore(ctx)
+  private val initialSkyTowerSettings = sanitizeSkyTowerSettings(skyTowerSettingsStore.load())
+  private val initialInkGardenSceneSettings = sanitizeInkGardenSceneSettings(inkGardenSceneSettingsStore.load())
   private var debugRawLoopRecord: DebugRawLoopRecord? =
     debugRawLoopStore.load(rawSampleRateHz * DEBUG_RAW_LOOP_DURATION_SECONDS)
   private val debugRawLoopCaptureBuffer = IntArray(rawSampleRateHz * DEBUG_RAW_LOOP_DURATION_SECONDS)
@@ -53,9 +56,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   private val _ui = MutableStateFlow(
     UiState(
       plotSettings = plotSettingsStore.load(),
-      skyTowerSettings = skyTowerSettingsStore.load(),
+      skyTowerSettings = initialSkyTowerSettings,
       noiseColor = noiseColorStore.load(),
-      inkGarden = InkGardenUiState(refreshMode = inkGardenRefreshModeStore.load()),
+      inkGarden = InkGardenUiState(
+        refreshMode = inkGardenRefreshModeStore.load(),
+        sceneSettings = initialInkGardenSceneSettings,
+      ),
       debugRawLoopAvailable = debugRawLoopRecord != null,
     )
   )
@@ -611,6 +617,26 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     inkGardenRefreshModeStore.save(value)
   }
 
+  fun setInkGardenEnhancedFxEnabled(value: Boolean) {
+    updateInkGardenSceneSettings { it.copy(enhancedFxEnabled = value) }
+  }
+
+  fun setInkGardenGhostTrailsEnabled(value: Boolean) {
+    updateInkGardenSceneSettings { it.copy(ghostTrailsEnabled = value) }
+  }
+
+  fun setInkGardenGoldDustEnabled(value: Boolean) {
+    updateInkGardenSceneSettings { it.copy(goldDustEnabled = value) }
+  }
+
+  fun setInkGardenEffectTriggerThreshold(value: Float) {
+    updateInkGardenSceneSettings { it.copy(effectTriggerThreshold = value) }
+  }
+
+  fun setInkGardenEffectStrength(value: Float) {
+    updateInkGardenSceneSettings { it.copy(effectStrength = value) }
+  }
+
   fun requestNewInkGardenPicture() {
     if (_ui.value.selectedGameId != GameId.INK_GARDEN) return
     if (!_ui.value.sessionRunning || !_ui.value.gameRunning) return
@@ -636,6 +662,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
           richness = telemetry.richness.coerceIn(0f, 1f),
           growthActive = telemetry.growthActive,
           motifName = telemetry.motifName,
+          brushPresetName = telemetry.brushPresetName,
         ),
       )
     }
@@ -759,6 +786,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   fun setSkyTowerIrregularity(value: Float) {
     updateSkyTowerSettings { it.copy(irregularity = value) }
+  }
+
+  fun setSkyTowerCollapseEnabled(value: Boolean) {
+    updateSkyTowerSettings { it.copy(collapseEnabled = value) }
   }
 
   fun panRawPlotBy(deltaSeconds: Int) {
@@ -1489,7 +1520,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   private fun updateSkyTowerSettings(transform: (SkyTowerSettings) -> SkyTowerSettings) {
     var updatedSettings = _ui.value.skyTowerSettings
     _ui.update { current ->
-      updatedSettings = transform(current.skyTowerSettings).clamped()
+      updatedSettings = sanitizeSkyTowerSettings(transform(current.skyTowerSettings))
       current.copy(skyTowerSettings = updatedSettings)
     }
     skyTowerSettingsStore.save(updatedSettings)
@@ -1562,10 +1593,41 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
           richness = 0f,
           growthActive = false,
           motifName = null,
+          brushPresetName = null,
         ),
         gamePaused = preservePaused,
       )
     }
+  }
+
+  private fun updateInkGardenSceneSettings(transform: (InkGardenSceneSettings) -> InkGardenSceneSettings) {
+    val updated = sanitizeInkGardenSceneSettings(transform(_ui.value.inkGarden.sceneSettings))
+    _ui.update {
+      it.copy(
+        inkGarden = it.inkGarden.copy(sceneSettings = updated),
+      )
+    }
+    inkGardenSceneSettingsStore.save(updated)
+  }
+
+  private fun sanitizeSkyTowerSettings(settings: SkyTowerSettings): SkyTowerSettings {
+    val clamped = settings.clamped()
+    if (!FeatureFlags.skyTowerCollapseModeEnabled) {
+      return clamped.copy(collapseEnabled = false)
+    }
+    return clamped
+  }
+
+  private fun sanitizeInkGardenSceneSettings(settings: InkGardenSceneSettings): InkGardenSceneSettings {
+    val clamped = settings.clamped()
+    if (!FeatureFlags.inkMagicalEffectsEnabled) {
+      return clamped.copy(
+        enhancedFxEnabled = false,
+        ghostTrailsEnabled = false,
+        goldDustEnabled = false,
+      )
+    }
+    return clamped
   }
 
   private fun nextInkGardenCompositionSeed(nowMs: Long, version: Int): Int {

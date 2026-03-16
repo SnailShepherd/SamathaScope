@@ -1,0 +1,6 @@
+PASS tabLabels_areVisible
+PASS learnTab_showsCalibrationAndGlossaryContent
+PASS dashboard_showsRawEegAndMetricExplorer
+PASS settingsTab_showsAudioControls
+PASS gameTab_showsPickerAndMappings
+PASS gameTab_switchesBetweenHybridAndPassiveHints

@@ -73,6 +73,7 @@ fun SkyTowerHost(
   }
 
   LaunchedEffect(controller, running) {
+    if (!running) return@LaunchedEffect
     var lastFrameNanos = 0L
     while (isActive) {
       withFrameNanos { frameNanos ->

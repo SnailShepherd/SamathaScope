@@ -30,6 +30,8 @@ func _draw() -> void:
 	var size := get_viewport_rect().size
 	if size.x <= 1.0 or size.y <= 1.0:
 		return
+	var brush_profile: Dictionary = _composition.get("brush_profile", {})
+	var effect_settings: Dictionary = _composition.get("ink_effect_settings", {})
 
 	for point in _grain_points:
 		draw_circle(point, 0.9, Color(0.16, 0.15, 0.13, 0.018))
@@ -54,6 +56,25 @@ func _draw() -> void:
 	var pulse_alpha: float = _pulse * 0.018
 	if pulse_alpha > 0.001:
 		draw_circle(size * Vector2(0.56, 0.40), size.y * 0.28, Color(0.18, 0.16, 0.14, pulse_alpha))
+
+	if bool(effect_settings.get("enhanced_fx_enabled", false)) and bool(effect_settings.get("gold_dust_enabled", true)):
+		_draw_gold_dust(size, float(brush_profile.get("effect_mix", 0.0)), float(effect_settings.get("effect_strength", 0.48)))
+
+func _draw_gold_dust(size: Vector2, effect_mix: float, strength: float) -> void:
+	var mix := clamp(effect_mix * strength, 0.0, 1.0)
+	if mix <= 0.02:
+		return
+	var center := size * Vector2(0.58, 0.38)
+	var radius := size.y * (0.09 + mix * 0.06)
+	for mote_index in range(12):
+		var t := float(mote_index) / 12.0
+		var angle := (_pulse * 1.8) + (t * TAU)
+		var offset := Vector2(cos(angle), sin(angle * 1.18)) * (radius * (0.48 + t * 0.42))
+		var alpha := (0.04 + mix * 0.16) * (1.0 - t * 0.42)
+		var mote_radius := 0.8 + mix * 1.6 + float(mote_index % 3) * 0.2
+		draw_circle(center + offset, mote_radius, Color(0.88, 0.73, 0.34, alpha))
+		if mote_index % 2 == 0:
+			draw_circle(center + offset, mote_radius * 0.38, Color(0.99, 0.93, 0.74, alpha * 0.74))
 
 func _build_paper_noise() -> void:
 	_grain_points.clear()

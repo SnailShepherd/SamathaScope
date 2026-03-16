@@ -162,7 +162,7 @@ class EegProcessor(
     val spectralEntropy = spectralEntropy(analysisSpectrum, 4f, 30f)
     val blinkRateHz = blinkRateHz(detrended)
     val clipFraction = clipFraction(rawWindow)
-    val lineNoiseRatio = bandPower(notchedSpectrum, 49f, 51f) / (bandPower(rawSpectrum, 1f, 60f) + eps)
+    val lineNoiseRatio = bandPower(rawSpectrum, 49f, 51f) / (bandPower(rawSpectrum, 1f, 60f) + eps)
     val hfRatio = pHf / (p4To13 + pHf + eps)
 
     return EegFeatures(

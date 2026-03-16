@@ -3,6 +3,7 @@ package com.mordin.samathascope.scene
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
 import com.mordin.samathascope.GameId
+import com.mordin.samathascope.InkGardenSceneSettings
 import com.mordin.samathascope.scene.godot.InkGardenTelemetry
 import com.mordin.samathascope.scene.godot.GodotSceneHost
 import com.mordin.samathascope.scene.scriptorium.ScriptoriumHost
@@ -18,6 +19,7 @@ fun GameSceneHost(
   paused: Boolean,
   inputEnabled: Boolean,
   skyTowerSettings: SkyTowerSettings,
+  inkGardenSceneSettings: InkGardenSceneSettings,
   inkGardenCompositionSeed: Int,
   onSummaryChanged: (SceneSummary) -> Unit,
   onInkGardenTelemetryChanged: (InkGardenTelemetry) -> Unit,
@@ -41,6 +43,7 @@ fun GameSceneHost(
         sceneState = sceneState,
         running = running,
         paused = paused,
+        inkGardenSceneSettings = inkGardenSceneSettings,
         compositionSeed = inkGardenCompositionSeed,
         onSummaryChanged = onSummaryChanged,
         onInkGardenTelemetryChanged = onInkGardenTelemetryChanged,

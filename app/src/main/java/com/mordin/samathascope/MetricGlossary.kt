@@ -15,6 +15,7 @@ data class MetricGlossaryEntry(
   val displayFormula: String,
   val plainFormula: String,
   val canBeFeedbackSource: Boolean,
+  val interpretiveNote: String = "",
   val terms: List<MetricGlossaryTerm> = emptyList(),
 )
 
@@ -30,6 +31,7 @@ object MetricGlossary {
       displayFormula = "MP = Settledness × Alertness × Quality Confidence",
       plainFormula = "MeditationProxy = Settledness * Alertness * QualityConfidence",
       canBeFeedbackSource = true,
+      interpretiveNote = "This is a reward heuristic for gameplay and basic session trends, not a clinical meditation score. Individual calibration quality affects the reading.",
     ),
     MetricGlossaryEntry(
       type = PlotType.SETTLEDNESS,
@@ -41,6 +43,7 @@ object MetricGlossary {
       displayFormula = "S = sigmoid(z(α/β) − 0.5 × z(θ/α))",
       plainFormula = "Settledness = sigmoid(z(ABR) - 0.5*z(TAR))",
       canBeFeedbackSource = true,
+      interpretiveNote = "Frontal α/β balance is highly state- and person-specific. The score is z-scored against your own session baseline, so its first few minutes are less stable.",
       terms = listOf(
         MetricGlossaryTerm("α/β (ABR)", "Alpha-over-beta ratio. Higher values often look calmer, as long as they are not paired with sleepy slowing."),
         MetricGlossaryTerm("θ/α (TAR)", "Theta-over-alpha ratio. Higher values can point toward drowsier slowing, so settledness subtracts some of it."),
@@ -56,6 +59,7 @@ object MetricGlossary {
       displayFormula = "C = sigmoid(−z(θ/β))",
       plainFormula = "Control = sigmoid(-z(TBR))",
       canBeFeedbackSource = false,
+      interpretiveNote = "θ/β regulation patterns overlap with task-demands and mental effort. High control during meditation may reflect active steering more than effortless stability.",
       terms = listOf(
         MetricGlossaryTerm("θ/β (TBR)", "Theta-over-beta ratio. Higher values often look more drifty; lower values tend to look more controlled."),
       ),
@@ -70,6 +74,7 @@ object MetricGlossary {
       displayFormula = "A = 1 − Drowsiness",
       plainFormula = "Alertness = 1 - DrowsyScore",
       canBeFeedbackSource = true,
+      interpretiveNote = "Alertness inherits all limits of the drowsiness model. It is not a clinical vigilance measure and can fluctuate with eyes-closed relaxation even when the user is awake.",
     ),
     MetricGlossaryEntry(
       type = PlotType.DROWSY_SCORE,
@@ -81,6 +86,7 @@ object MetricGlossary {
       displayFormula = "D = sigmoid(1.3 × z(θ/α) + 0.9 × z(θ/β) − 0.7 × z(H) − 0.4 × z(α/β))",
       plainFormula = "D = sigmoid(1.3*z(TAR) + 0.9*z(TBR) - 0.7*z(Entropy) - 0.4*z(ABR))",
       canBeFeedbackSource = false,
+      interpretiveNote = "Drowsy and relaxed patterns are hard to separate at single-electrode FP1 resolution. Brief elevated readings can happen during deep relaxation, not only during drowsiness.",
       terms = listOf(
         MetricGlossaryTerm("θ/α (TAR)", "Theta-over-alpha ratio. When this rises, the window looks more slowed and sleepy."),
         MetricGlossaryTerm("θ/β (TBR)", "Theta-over-beta ratio. Higher values can indicate reduced control and more drowsy-like drift."),
@@ -95,9 +101,10 @@ object MetricGlossary {
       shortMeaning = "How contaminated the current signal looks.",
       drivers = "It rises with poor contact, blink or transient activity, muscle-like high-frequency activity, clipping, and packet stalls.",
       longMeaning = "This is the main contamination gate. High artefact means the app should stop trusting the state estimate and reduce reward, even if the waveform also looks quiet.",
-      displayFormula = "AS = 0.30 × contact + 0.25 × EMG + 0.20 × blink + 0.15 × clip + 0.10 × stall",
-      plainFormula = "ArtefactScore = 0.30*contact + 0.25*emg + 0.20*blink + 0.15*clip + 0.10*stall",
+      displayFormula = "AS = 0.30 × contact + 0.10 × line + 0.25 × EMG + 0.16 × blink + 0.12 × clip + 0.10 × stall",
+      plainFormula = "ArtefactScore = 0.30*contact + 0.10*line + 0.25*emg + 0.16*blink + 0.12*clip + 0.10*stall",
       canBeFeedbackSource = false,
+      interpretiveNote = "Sitting very still and ensuring good headset contact reduces this significantly. Jaw clenching, forehead tension, and loose electrodes are the most common sources.",
     ),
     MetricGlossaryEntry(
       type = PlotType.QUALITY_CONFIDENCE,
@@ -109,6 +116,7 @@ object MetricGlossary {
       displayFormula = "QC = 1 − Artefact Score",
       plainFormula = "QualityConfidence = 1 - ArtefactScore",
       canBeFeedbackSource = false,
+      interpretiveNote = "High quality confidence means the window passed artefact screening, not that the classification is correct. Correct classification additionally requires a well-established personal baseline.",
     ),
     MetricGlossaryEntry(
       type = PlotType.EFFORTFUL_FOCUS_SCORE,
@@ -120,6 +128,7 @@ object MetricGlossary {
       displayFormula = "F = sigmoid(−0.9 × z(α/β) − 0.7 × z(θ/β) + 0.4 × z(log β) − 0.2 × z(H))",
       plainFormula = "F = sigmoid(-0.9*z(ABR) - 0.7*z(TBR) + 0.4*z(logBeta) - 0.2*z(Entropy))",
       canBeFeedbackSource = false,
+      interpretiveNote = "Effortful focus during meditation is not automatically better practice. This metric is used as a short rescue pulse in games, not as a sustained reward channel.",
     ),
     MetricGlossaryEntry(
       type = PlotType.MIND_WANDERING_SCORE,
@@ -131,6 +140,7 @@ object MetricGlossary {
       displayFormula = "W = sigmoid(0.9 × z(θ/β) − 0.4 × z(α/β) − 0.2 × z(H))",
       plainFormula = "W = sigmoid(0.9*z(TBR) - 0.4*z(ABR) - 0.2*z(Entropy))",
       canBeFeedbackSource = false,
+      interpretiveNote = "Awake drifting is not reliably separable from settled contemplation at single-electrode FP1. Use this as a loose disorganisation proxy, not as a definitive thought-content indicator.",
       terms = listOf(
         MetricGlossaryTerm("θ/β (TBR)", "Theta-over-beta ratio. Higher values often look more drifty or less controlled."),
         MetricGlossaryTerm("α/β (ABR)", "Alpha-over-beta ratio. Stronger settled alpha-over-beta balance pushes mind-wandering evidence back down."),
@@ -147,6 +157,7 @@ object MetricGlossary {
       displayFormula = "Provided by ThinkGear / NeuroSky",
       plainFormula = "Provided by ThinkGear / NeuroSky",
       canBeFeedbackSource = false,
+      interpretiveNote = "Vendor eSense values use a proprietary algorithm; methodology is not disclosed. Treat as supplementary context, not as a comparable alternative.",
     ),
     MetricGlossaryEntry(
       type = PlotType.ESENSE_ATTENTION,
@@ -158,6 +169,7 @@ object MetricGlossary {
       displayFormula = "Provided by ThinkGear / NeuroSky",
       plainFormula = "Provided by ThinkGear / NeuroSky",
       canBeFeedbackSource = false,
+      interpretiveNote = "Vendor eSense values use a proprietary algorithm; methodology is not disclosed. Treat as supplementary context, not as a comparable alternative.",
     ),
     MetricGlossaryEntry(
       type = PlotType.RAW,
@@ -169,6 +181,7 @@ object MetricGlossary {
       displayFormula = "Live FP1 raw stream at 512 Hz",
       plainFormula = "Live FP1 raw stream at 512 Hz",
       canBeFeedbackSource = false,
+      interpretiveNote = "Raw EEG at FP1 combines frontal neural activity with muscle, eye, and contact artefacts. Visual inspection helps confirm signal quality before trusting derived metrics.",
     ),
   ).associateBy { it.type }
 

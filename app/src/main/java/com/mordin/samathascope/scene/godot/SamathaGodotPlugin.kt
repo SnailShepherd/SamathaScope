@@ -35,12 +35,14 @@ class SamathaGodotPlugin(
     richness: Double,
     growthActive: Boolean,
     motifName: String,
+    brushPresetName: String,
     version: Int,
   ) {
     GodotBridgeStore.updateInkGardenTelemetry(
       richness = richness.toFloat(),
       growthActive = growthActive,
       motifName = motifName,
+      brushPresetName = brushPresetName,
       version = version,
     )
   }

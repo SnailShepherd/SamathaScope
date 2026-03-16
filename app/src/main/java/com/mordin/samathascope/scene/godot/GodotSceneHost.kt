@@ -32,6 +32,7 @@ import androidx.fragment.app.FragmentContainerView
 import androidx.fragment.app.commitNow
 import com.mordin.samathascope.R
 import com.mordin.samathascope.GameId
+import com.mordin.samathascope.InkGardenSceneSettings
 import com.mordin.samathascope.scene.SceneState
 import com.mordin.samathascope.scene.SceneSummary
 import com.mordin.samathascope.scene.defaultSummary
@@ -44,6 +45,7 @@ fun GodotSceneHost(
   sceneState: SceneState,
   running: Boolean,
   paused: Boolean,
+  inkGardenSceneSettings: InkGardenSceneSettings = InkGardenSceneSettings(),
   compositionSeed: Int = 0,
   onSummaryChanged: (SceneSummary) -> Unit,
   onInkGardenTelemetryChanged: (InkGardenTelemetry) -> Unit = {},
@@ -65,6 +67,12 @@ fun GodotSceneHost(
         else -> gameId.defaultSummary(sceneState)
       }
     )
+  }
+
+  LaunchedEffect(gameId, inkGardenSceneSettings) {
+    if (gameId == GameId.INK_GARDEN) {
+      bridge.setInkGardenSceneSettings(inkGardenSceneSettings)
+    }
   }
 
   LaunchedEffect(gameId, runId, status.mainLoopStarted) {

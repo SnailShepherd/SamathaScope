@@ -1,7 +1,9 @@
 package com.mordin.samathascope.scene.godot
 
 import android.util.Log
+import com.mordin.samathascope.FeatureFlags
 import com.mordin.samathascope.GameId
+import com.mordin.samathascope.InkGardenSceneSettings
 import com.mordin.samathascope.scene.SceneState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -14,12 +16,14 @@ data class GodotBridgePayload(
   val sceneState: SceneState = SceneState(),
   val version: Int = 0,
   val compositionSeed: Int = 0,
+  val inkGardenSceneSettings: InkGardenSceneSettings = InkGardenSceneSettings(),
 )
 
 data class InkGardenTelemetry(
   val richness: Float = 0f,
   val growthActive: Boolean = false,
   val motifName: String? = null,
+  val brushPresetName: String? = null,
   val version: Int = 0,
 )
 
@@ -65,6 +69,10 @@ object GodotBridgeStore {
     _payload.value = _payload.value.copy(sceneState = state)
   }
 
+  fun setInkGardenSceneSettings(settings: InkGardenSceneSettings) {
+    _payload.value = _payload.value.copy(inkGardenSceneSettings = settings.clamped())
+  }
+
   fun payloadJson(): String {
     val payload = _payload.value
     return JSONObject()
@@ -82,6 +90,13 @@ object GodotBridgeStore {
       .put("calmness_rate", payload.sceneState.calmnessRate)
       .put("focus_rate", payload.sceneState.focusRate)
       .put("intensity_rate", payload.sceneState.intensityRate)
+      .put("ink_enhanced_fx_enabled", payload.inkGardenSceneSettings.enhancedFxEnabled)
+      .put("ink_ghost_trails_enabled", payload.inkGardenSceneSettings.ghostTrailsEnabled)
+      .put("ink_gold_dust_enabled", payload.inkGardenSceneSettings.goldDustEnabled)
+      .put("ink_effect_trigger_threshold", payload.inkGardenSceneSettings.effectTriggerThreshold)
+      .put("ink_effect_strength", payload.inkGardenSceneSettings.effectStrength)
+        .put("ink_brush_preset_engine_enabled", FeatureFlags.inkBrushPresetEngineEnabled)
+        .put("ink_magical_fx_enabled", FeatureFlags.inkMagicalEffectsEnabled)
       .toString()
   }
 
@@ -127,6 +142,7 @@ object GodotBridgeStore {
     richness: Float,
     growthActive: Boolean,
     motifName: String?,
+    brushPresetName: String?,
     version: Int,
   ) {
     _status.value = _status.value.copy(
@@ -134,6 +150,7 @@ object GodotBridgeStore {
         richness = richness.coerceIn(0f, 1f),
         growthActive = growthActive,
         motifName = motifName?.takeIf { it.isNotBlank() },
+        brushPresetName = brushPresetName?.takeIf { it.isNotBlank() },
         version = version,
       ),
       lastError = null,
@@ -170,6 +187,10 @@ class GodotSceneBridge {
 
   fun pushSceneState(state: SceneState) {
     GodotBridgeStore.pushSceneState(state)
+  }
+
+  fun setInkGardenSceneSettings(settings: InkGardenSceneSettings) {
+    GodotBridgeStore.setInkGardenSceneSettings(settings)
   }
 
   fun reportTimeout(gameId: GameId) {

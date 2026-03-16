@@ -124,9 +124,10 @@ class ScoreModel {
     val stall = clamp01(features.maxGapMs / 500f)
     val artefactScore = clamp01(
       (0.30f * contact) +
+        (0.10f * line) +
         (0.25f * emg) +
-        (0.20f * blink) +
-        (0.15f * clip) +
+        (0.16f * blink) +
+        (0.12f * clip) +
         (0.10f * stall)
     )
     val isContaminated = poorSignal > 25 ||

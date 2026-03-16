@@ -1,6 +1,66 @@
 extends Node2D
 
 const InkMotifRef = preload("res://scenes/ink_garden/InkMotif.gd")
+const PRESET_SWITCH_MIN_DWELL_SECONDS := 0.90
+const PRESET_SWITCH_COOLDOWN_SECONDS := 1.35
+const PRESET_SWITCH_SCORE_MARGIN := 0.10
+const BRUSH_PRESETS := {
+	"breath_line": {
+		"preset_name": "breath_line",
+		"taper": 1.00,
+		"bleed": 1.00,
+		"pooling": 1.00,
+		"jitter": 0.30,
+		"core_break": 0.00,
+		"opacity": 1.00,
+		"stroke_cap": 22,
+		"reactive_accent_cap": 2,
+	},
+	"still_pool": {
+		"preset_name": "still_pool",
+		"taper": 0.88,
+		"bleed": 1.18,
+		"pooling": 1.32,
+		"jitter": 0.16,
+		"core_break": -0.06,
+		"opacity": 0.96,
+		"stroke_cap": 20,
+		"reactive_accent_cap": 1,
+	},
+	"calligrapher": {
+		"preset_name": "calligrapher",
+		"taper": 1.16,
+		"bleed": 0.88,
+		"pooling": 0.92,
+		"jitter": 0.10,
+		"core_break": -0.04,
+		"opacity": 1.08,
+		"stroke_cap": 18,
+		"reactive_accent_cap": 1,
+	},
+	"wander_dry": {
+		"preset_name": "wander_dry",
+		"taper": 1.08,
+		"bleed": 0.78,
+		"pooling": 0.72,
+		"jitter": 0.44,
+		"core_break": 0.10,
+		"opacity": 0.92,
+		"stroke_cap": 17,
+		"reactive_accent_cap": 1,
+	},
+	"storm_reed": {
+		"preset_name": "storm_reed",
+		"taper": 1.22,
+		"bleed": 0.92,
+		"pooling": 0.86,
+		"jitter": 0.52,
+		"core_break": 0.08,
+		"opacity": 1.04,
+		"stroke_cap": 16,
+		"reactive_accent_cap": 1,
+	},
+}
 
 @onready var stem_system := $StemSystem
 @onready var bloom_system := $BloomSystem
@@ -99,6 +159,8 @@ func _ensure_runtime() -> void:
 func _build_runtime(size: Vector2, seed: int) -> Dictionary:
 	var motif := _motif_for_seed(seed)
 	var layout := _build_layout(motif, size, seed)
+	var initial_preset_name := _desired_brush_preset_name(SceneParamBus.scene_state)
+	var initial_brush_profile := _finish_brush_profile(BRUSH_PRESETS[initial_preset_name].duplicate(true), SceneParamBus.scene_state)
 	var composition := {
 		"motif": motif,
 		"name": _motif_name(motif),
@@ -108,6 +170,8 @@ func _build_runtime(size: Vector2, seed: int) -> Dictionary:
 		"blossoms": [],
 		"mist_bands": [],
 		"seal": {},
+		"brush_profile": initial_brush_profile,
+		"ink_effect_settings": SceneParamBus.ink_settings.duplicate(true),
 	}
 	var queue := _plan_actions(motif, layout, seed)
 	var target_weight := 0.0
@@ -126,6 +190,11 @@ func _build_runtime(size: Vector2, seed: int) -> Dictionary:
 		"spawn_cooldown": 0.10,
 		"accent_cooldown": 0.0,
 		"next_element_id": 1,
+		"reactive_accents_spawned": 0,
+		"active_preset_name": initial_preset_name,
+		"pending_preset_name": "",
+		"pending_preset_seconds": 0.0,
+		"preset_switch_cooldown": 0.0,
 	}
 
 func _build_layout(motif: int, size: Vector2, seed: int) -> Dictionary:
@@ -203,6 +272,11 @@ func _plan_actions(motif: int, layout: Dictionary, seed: int) -> Array:
 	return actions
 
 func _update_runtime(delta: float, state: Dictionary, active: bool) -> void:
+	_runtime["preset_switch_cooldown"] = max(float(_runtime.get("preset_switch_cooldown", 0.0)) - delta, 0.0)
+	var brush_profile := _compose_brush_profile(state, delta)
+	_runtime["brush_profile"] = brush_profile
+	_composition["brush_profile"] = brush_profile
+	_composition["ink_effect_settings"] = SceneParamBus.ink_settings.duplicate(true)
 	var accent_cooldown := max(float(_runtime.get("accent_cooldown", 0.0)) - delta, 0.0)
 	_runtime["accent_cooldown"] = accent_cooldown
 	if active:
@@ -591,6 +665,11 @@ func _spawn_pine_action(action: Dictionary, state: Dictionary) -> void:
 			)
 
 func _maybe_queue_reactive_accent(state: Dictionary) -> void:
+	var brush_profile: Dictionary = _composition.get("brush_profile", {})
+	if int(_runtime.get("reactive_accents_spawned", 0)) >= int(brush_profile.get("reactive_accent_cap", 1)):
+		return
+	if _composition_mark_count() >= int(brush_profile.get("stroke_cap", 18)):
+		return
 	if float(_runtime.get("accent_cooldown", 0.0)) > 0.0:
 		return
 	if float(_runtime.get("richness", 0.0)) >= 0.82:
@@ -611,6 +690,7 @@ func _maybe_queue_reactive_accent(state: Dictionary) -> void:
 	_runtime["action_queue"].push_front(accent_action)
 	_runtime["target_weight"] = float(_runtime["target_weight"]) + float(accent_action.get("weight", 0.03))
 	_runtime["accent_cooldown"] = 1.2
+	_runtime["reactive_accents_spawned"] = int(_runtime.get("reactive_accents_spawned", 0)) + 1
 
 func _update_reveals(delta: float, state: Dictionary) -> void:
 	_update_element_list_reveal(_composition.get("strokes", []), delta, state, 1.0)
@@ -670,8 +750,114 @@ func _report_telemetry() -> void:
 	SceneParamBus.report_ink_garden_telemetry(
 		float(_runtime.get("richness", 0.0)),
 		bool(_runtime.get("growth_active", false)),
-		String(_runtime.get("motif_name", "ink_garden"))
+		String(_runtime.get("motif_name", "ink_garden")),
+		String(_composition.get("brush_profile", {}).get("preset_name", "breath_line"))
 	)
+
+func _compose_brush_profile(state: Dictionary, delta: float = 0.0) -> Dictionary:
+	if not bool(SceneParamBus.ink_settings.get("brush_preset_engine_enabled", true)):
+		return _finish_brush_profile(BRUSH_PRESETS["breath_line"].duplicate(true), state)
+	var preset_name := _resolve_brush_preset_name(state, delta)
+	var profile: Dictionary = BRUSH_PRESETS[preset_name].duplicate(true)
+	return _finish_brush_profile(profile, state)
+
+func _resolve_brush_preset_name(state: Dictionary, delta: float) -> String:
+	var desired_preset_name := _desired_brush_preset_name(state)
+	var active_preset_name := String(_runtime.get("active_preset_name", desired_preset_name))
+	if active_preset_name == "":
+		_runtime["active_preset_name"] = desired_preset_name
+		_runtime["pending_preset_name"] = ""
+		_runtime["pending_preset_seconds"] = 0.0
+		return desired_preset_name
+	if desired_preset_name == active_preset_name:
+		_runtime["pending_preset_name"] = ""
+		_runtime["pending_preset_seconds"] = 0.0
+		return active_preset_name
+	var desired_score := _preset_score(desired_preset_name, state)
+	var active_score := _preset_score(active_preset_name, state)
+	if desired_score < active_score + PRESET_SWITCH_SCORE_MARGIN:
+		_runtime["pending_preset_name"] = ""
+		_runtime["pending_preset_seconds"] = 0.0
+		return active_preset_name
+	if float(_runtime.get("preset_switch_cooldown", 0.0)) > 0.0:
+		_runtime["pending_preset_name"] = ""
+		_runtime["pending_preset_seconds"] = 0.0
+		return active_preset_name
+	if String(_runtime.get("pending_preset_name", "")) != desired_preset_name:
+		_runtime["pending_preset_name"] = desired_preset_name
+		_runtime["pending_preset_seconds"] = 0.0
+	_runtime["pending_preset_seconds"] = float(_runtime.get("pending_preset_seconds", 0.0)) + delta
+	if float(_runtime.get("pending_preset_seconds", 0.0)) < PRESET_SWITCH_MIN_DWELL_SECONDS:
+		return active_preset_name
+	_runtime["active_preset_name"] = desired_preset_name
+	_runtime["pending_preset_name"] = ""
+	_runtime["pending_preset_seconds"] = 0.0
+	_runtime["preset_switch_cooldown"] = PRESET_SWITCH_COOLDOWN_SECONDS
+	return desired_preset_name
+
+func _desired_brush_preset_name(state: Dictionary) -> String:
+	var calmness := float(state.get("calmness", 0.0))
+	var focus := float(state.get("focus", 0.0))
+	var stability := float(state.get("stability", 0.0))
+	var intensity := float(state.get("intensity", 0.0))
+	var drift := abs(float(state.get("drift", 0.0)))
+	var preset_name := "breath_line"
+	if intensity > 0.72:
+		preset_name = "storm_reed"
+	elif focus > 0.68 and stability > 0.58:
+		preset_name = "calligrapher"
+	elif calmness > 0.72 and stability > 0.58:
+		preset_name = "still_pool"
+	elif drift > 0.42:
+		preset_name = "wander_dry"
+	return preset_name
+
+func _preset_score(preset_name: String, state: Dictionary) -> float:
+	var calmness := float(state.get("calmness", 0.0))
+	var focus := float(state.get("focus", 0.0))
+	var stability := float(state.get("stability", 0.0))
+	var intensity := float(state.get("intensity", 0.0))
+	var drift := abs(float(state.get("drift", 0.0)))
+	match preset_name:
+		"storm_reed":
+			return intensity * 0.64 + drift * 0.28 + float(state.get("intensity_rate", 0.0)) * 0.12
+		"calligrapher":
+			return focus * 0.50 + stability * 0.34 + calmness * 0.10 - drift * 0.06
+		"still_pool":
+			return calmness * 0.52 + stability * 0.28 + (1.0 - drift) * 0.16
+		"wander_dry":
+			return drift * 0.58 + (1.0 - stability) * 0.18 + intensity * 0.16
+		_:
+			return calmness * 0.20 + focus * 0.20 + stability * 0.20 + (1.0 - drift) * 0.20 + (1.0 - intensity) * 0.20
+
+func _finish_brush_profile(profile: Dictionary, state: Dictionary) -> Dictionary:
+	var calmness := float(state.get("calmness", 0.0))
+	var focus := float(state.get("focus", 0.0))
+	var stability := float(state.get("stability", 0.0))
+	var intensity := float(state.get("intensity", 0.0))
+	var drift := abs(float(state.get("drift", 0.0)))
+	profile["taper"] = clamp(float(profile["taper"]) + calmness * 0.08 - intensity * 0.05, 0.72, 1.32)
+	profile["bleed"] = clamp(float(profile["bleed"]) + calmness * 0.18 - focus * 0.08, 0.68, 1.38)
+	profile["pooling"] = clamp(float(profile["pooling"]) + stability * 0.12 + calmness * 0.10 - drift * 0.08, 0.60, 1.48)
+	profile["jitter"] = clamp(float(profile["jitter"]) + drift * 0.26 + intensity * 0.12 - stability * 0.10, 0.06, 0.72)
+	profile["core_break"] = clamp(float(profile["core_break"]) + drift * 0.06 + intensity * 0.04 - focus * 0.04, -0.10, 0.18)
+	profile["opacity"] = clamp(float(profile["opacity"]) + focus * 0.08 + intensity * 0.04 - calmness * 0.03, 0.82, 1.16)
+	profile["effect_mix"] = _effect_mix(state)
+	return profile
+
+func _effect_mix(state: Dictionary) -> float:
+	var settings: Dictionary = SceneParamBus.ink_settings
+	if not bool(settings.get("magical_fx_enabled", true)):
+		return 0.0
+	if not bool(settings.get("enhanced_fx_enabled", false)):
+		return 0.0
+	var threshold := float(settings.get("effect_trigger_threshold", 0.62))
+	var strength := float(settings.get("effect_strength", 0.48))
+	var trigger_signal := max(float(state.get("focus_rate", 0.0)), float(state.get("intensity_rate", 0.0))) + (float(state.get("intensity", 0.0)) * 0.18)
+	return clamp(((trigger_signal - threshold) / max(1.0 - threshold, 0.001)) * strength, 0.0, 1.0)
+
+func _composition_mark_count() -> int:
+	return _composition.get("strokes", []).size() + _composition.get("washes", []).size() + _composition.get("blossoms", []).size() + _composition.get("mist_bands", []).size()
 
 func _reveal_multiplier(state: Dictionary, base_multiplier: float) -> float:
 	return base_multiplier + (float(state.get("intensity", 0.0)) * 0.34) + (float(state.get("focus", 0.0)) * 0.10) - (float(state.get("calmness", 0.0)) * 0.08)

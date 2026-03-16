@@ -59,6 +59,14 @@ class TowerPhysics {
 
   fun hasActiveBody(): Boolean = activeStone != null
 
+  fun removeTopSettledStone(): Boolean {
+    val top = settledStones.minByOrNull { it.y } ?: return false
+    settledStones.remove(top)
+    return true
+  }
+
+  fun settledStoneCount(): Int = settledStones.size
+
   fun previewNextBlockShape(): TowerBlockShape {
     return createTowerBlockShape(nextBodyId, settings)
   }

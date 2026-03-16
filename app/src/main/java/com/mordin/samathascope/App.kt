@@ -56,6 +56,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -187,6 +188,12 @@ private fun MainScreen(vm: MainViewModel) {
           onSkyTowerBaseWidthScaleChange = vm::setSkyTowerBaseWidthScale,
           onSkyTowerCarrierSpeedMultiplierChange = vm::setSkyTowerCarrierSpeedMultiplier,
           onSkyTowerIrregularityChange = vm::setSkyTowerIrregularity,
+          onSkyTowerCollapseEnabledChange = vm::setSkyTowerCollapseEnabled,
+          onInkGardenEnhancedFxEnabledChange = vm::setInkGardenEnhancedFxEnabled,
+          onInkGardenGhostTrailsEnabledChange = vm::setInkGardenGhostTrailsEnabled,
+          onInkGardenGoldDustEnabledChange = vm::setInkGardenGoldDustEnabled,
+          onInkGardenEffectTriggerThresholdChange = vm::setInkGardenEffectTriggerThreshold,
+          onInkGardenEffectStrengthChange = vm::setInkGardenEffectStrength,
         )
 
         AppTab.GAME -> GameTab(
@@ -560,6 +567,8 @@ private fun RawEegSection(
 ) {
   val settings = ui.plotSettings.getValue(PlotType.RAW)
   Panel {
+    Text(stringResource(R.string.section_raw_eeg), fontWeight = FontWeight.SemiBold)
+    Spacer(Modifier.height(6.dp))
     WaveformPlot(
       samples = ui.rawPreview,
       yMin = settings.yMin,
@@ -645,6 +654,12 @@ private fun SettingsTab(
   onSkyTowerBaseWidthScaleChange: (Float) -> Unit,
   onSkyTowerCarrierSpeedMultiplierChange: (Float) -> Unit,
   onSkyTowerIrregularityChange: (Float) -> Unit,
+  onSkyTowerCollapseEnabledChange: (Boolean) -> Unit,
+  onInkGardenEnhancedFxEnabledChange: (Boolean) -> Unit,
+  onInkGardenGhostTrailsEnabledChange: (Boolean) -> Unit,
+  onInkGardenGoldDustEnabledChange: (Boolean) -> Unit,
+  onInkGardenEffectTriggerThresholdChange: (Float) -> Unit,
+  onInkGardenEffectStrengthChange: (Float) -> Unit,
 ) {
   Column(
     modifier = Modifier
@@ -740,6 +755,92 @@ private fun SettingsTab(
         onValueChange = onSkyTowerIrregularityChange,
         valueRange = SkyTowerSettings.IRREGULARITY_RANGE,
       )
+      if (FeatureFlags.skyTowerCollapseModeEnabled) {
+        Spacer(Modifier.height(6.dp))
+        LabeledCheckbox(
+          checked = ui.skyTowerSettings.collapseEnabled,
+          label = stringResource(R.string.sky_tower_collapse_label),
+          onCheckedChange = onSkyTowerCollapseEnabledChange,
+        )
+        Text(
+          stringResource(R.string.sky_tower_collapse_helper),
+          style = MaterialTheme.typography.bodySmall,
+        )
+      } else {
+        Spacer(Modifier.height(6.dp))
+        Text(
+          stringResource(R.string.feature_rollout_disabled, stringResource(R.string.sky_tower_collapse_label)),
+          style = MaterialTheme.typography.bodySmall,
+        )
+      }
+    }
+
+    Panel {
+      Text(stringResource(R.string.ink_garden_settings_title), fontWeight = FontWeight.SemiBold)
+      Spacer(Modifier.height(6.dp))
+      Text(
+        stringResource(R.string.ink_garden_settings_helper),
+        style = MaterialTheme.typography.bodySmall,
+      )
+      Spacer(Modifier.height(8.dp))
+      if (!FeatureFlags.inkBrushPresetEngineEnabled) {
+        Text(
+          stringResource(R.string.feature_rollout_disabled, stringResource(R.string.ink_garden_settings_title)),
+          style = MaterialTheme.typography.bodySmall,
+        )
+      }
+      if (FeatureFlags.inkMagicalEffectsEnabled) {
+        LabeledCheckbox(
+          checked = ui.inkGarden.sceneSettings.enhancedFxEnabled,
+          label = stringResource(R.string.ink_garden_enhanced_fx_label),
+          onCheckedChange = onInkGardenEnhancedFxEnabledChange,
+        )
+        Text(
+          stringResource(R.string.ink_garden_enhanced_fx_helper),
+          style = MaterialTheme.typography.bodySmall,
+        )
+        Spacer(Modifier.height(6.dp))
+        LabeledCheckbox(
+          checked = ui.inkGarden.sceneSettings.ghostTrailsEnabled,
+          label = stringResource(R.string.ink_garden_ghost_trails_label),
+          onCheckedChange = onInkGardenGhostTrailsEnabledChange,
+        )
+        LabeledCheckbox(
+          checked = ui.inkGarden.sceneSettings.goldDustEnabled,
+          label = stringResource(R.string.ink_garden_gold_dust_label),
+          onCheckedChange = onInkGardenGoldDustEnabledChange,
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+          stringResource(
+            R.string.ink_garden_effect_trigger_threshold,
+            (ui.inkGarden.sceneSettings.effectTriggerThreshold * 100f).roundToInt(),
+          ),
+          style = MaterialTheme.typography.bodySmall,
+        )
+        Slider(
+          value = ui.inkGarden.sceneSettings.effectTriggerThreshold,
+          onValueChange = onInkGardenEffectTriggerThresholdChange,
+          valueRange = InkGardenSceneSettings.EFFECT_TRIGGER_THRESHOLD_RANGE,
+        )
+        Text(
+          stringResource(
+            R.string.ink_garden_effect_strength,
+            (ui.inkGarden.sceneSettings.effectStrength * 100f).roundToInt(),
+          ),
+          style = MaterialTheme.typography.bodySmall,
+        )
+        Slider(
+          value = ui.inkGarden.sceneSettings.effectStrength,
+          onValueChange = onInkGardenEffectStrengthChange,
+          valueRange = InkGardenSceneSettings.EFFECT_STRENGTH_RANGE,
+        )
+      } else {
+        Text(
+          stringResource(R.string.feature_rollout_disabled, stringResource(R.string.ink_garden_enhanced_fx_label)),
+          style = MaterialTheme.typography.bodySmall,
+        )
+      }
     }
 
     Panel {
@@ -915,6 +1016,7 @@ private fun GameTab(
         paused = ui.gamePaused || pausedBySystem,
         inputEnabled = ui.sceneHudState.inputEnabled,
         skyTowerSettings = ui.skyTowerSettings,
+        inkGardenSceneSettings = ui.inkGarden.sceneSettings,
         inkGardenCompositionSeed = ui.inkGarden.compositionSeed,
         onSummaryChanged = { summary = it },
         onInkGardenTelemetryChanged = onInkGardenTelemetryChanged,
@@ -926,6 +1028,13 @@ private fun GameTab(
         HudRow(
           label = stringResource(R.string.ink_garden_motif),
           value = motifName.replace('_', ' '),
+        )
+      }
+      val brushPresetName = ui.inkGarden.brushPresetName
+      if (showInkGardenControls && !brushPresetName.isNullOrBlank()) {
+        HudRow(
+          label = stringResource(R.string.ink_garden_brush_preset),
+          value = brushPresetName.replace('_', ' '),
         )
       }
       HudRow(label = "Calmness", value = "${ui.sceneHudState.calmnessPercent}%")
@@ -999,6 +1108,8 @@ private fun DiagnosticsSection(ui: UiState) {
   Panel {
     Text(stringResource(R.string.section_diagnostics), fontWeight = FontWeight.SemiBold)
     Spacer(Modifier.height(4.dp))
+    ReliabilityBadge(ui)
+    Spacer(Modifier.height(8.dp))
     HudRow(label = stringResource(R.string.state_label), value = stateLabelLabel(ui.displayedStateLabel))
     HudRow(label = stringResource(R.string.telemetry_poor_signal), value = "${ui.poorSignal}")
     HudRow(label = stringResource(R.string.telemetry_samples_per_second), value = "${ui.samplesPerSecond.roundToInt()}")
@@ -1050,8 +1161,77 @@ private fun DiagnosticsSection(ui: UiState) {
 }
 
 @Composable
+private fun ReliabilityBadge(ui: UiState) {
+  val confidencePercent = (ui.qualityConfidence * 100f).roundToInt().coerceIn(0, 100)
+  val level = when {
+    ui.displayedStateLabel == StateLabel.SIGNAL_CONTAMINATED || ui.qualityConfidence < 0.40f -> ReliabilityLevel.LOW
+    ui.qualityConfidence < 0.70f -> ReliabilityLevel.MEDIUM
+    else -> ReliabilityLevel.HIGH
+  }
+  val title = when (level) {
+    ReliabilityLevel.HIGH -> stringResource(R.string.reliability_state_high)
+    ReliabilityLevel.MEDIUM -> stringResource(R.string.reliability_state_medium)
+    ReliabilityLevel.LOW -> stringResource(R.string.reliability_state_low)
+  }
+  val message = when {
+    ui.displayedStateLabel == StateLabel.SIGNAL_CONTAMINATED -> stringResource(R.string.reliability_message_contaminated)
+    level == ReliabilityLevel.LOW -> stringResource(R.string.reliability_message_low)
+    level == ReliabilityLevel.MEDIUM -> stringResource(R.string.reliability_message_medium)
+    else -> stringResource(R.string.reliability_message_high)
+  }
+
+  val containerColor = when (level) {
+    ReliabilityLevel.HIGH -> MaterialTheme.colorScheme.primaryContainer
+    ReliabilityLevel.MEDIUM -> MaterialTheme.colorScheme.secondaryContainer
+    ReliabilityLevel.LOW -> MaterialTheme.colorScheme.errorContainer
+  }
+  val contentColor = when (level) {
+    ReliabilityLevel.HIGH -> MaterialTheme.colorScheme.onPrimaryContainer
+    ReliabilityLevel.MEDIUM -> MaterialTheme.colorScheme.onSecondaryContainer
+    ReliabilityLevel.LOW -> MaterialTheme.colorScheme.onErrorContainer
+  }
+
+  Card(
+    colors = CardDefaults.cardColors(
+      containerColor = containerColor,
+      contentColor = contentColor,
+    ),
+    shape = RoundedCornerShape(10.dp),
+  ) {
+    Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+      Text(
+        text = stringResource(R.string.reliability_label, title, confidencePercent),
+        style = MaterialTheme.typography.bodyMedium,
+        fontWeight = FontWeight.SemiBold,
+      )
+      Spacer(Modifier.height(2.dp))
+      Text(
+        text = message,
+        style = MaterialTheme.typography.bodySmall,
+      )
+    }
+  }
+}
+
+private enum class ReliabilityLevel {
+  LOW,
+  MEDIUM,
+  HIGH,
+}
+
+private enum class LearnViewMode {
+  METRICS,
+  FOUNDATIONS,
+}
+
+@Composable
 private fun LearnTab() {
   val uriHandler = LocalUriHandler.current
+  var viewMode by rememberSaveable { mutableStateOf(LearnViewMode.METRICS) }
+  var selectedMetricName by rememberSaveable { mutableStateOf(PlotType.MEDITATION_PROXY.name) }
+
+  val selectedMetric = PlotType.entries.firstOrNull { it.name == selectedMetricName } ?: PlotType.MEDITATION_PROXY
+  val selectedEntry = MetricGlossary.entryFor(selectedMetric)
 
   Column(
     modifier = Modifier
@@ -1060,53 +1240,98 @@ private fun LearnTab() {
       .padding(12.dp),
     verticalArrangement = Arrangement.spacedBy(12.dp)
   ) {
-    LearnCard(
-      title = stringResource(R.string.learn_samatha_title),
-      body = stringResource(R.string.learn_samatha_body),
-    )
-    LearnCard(
-      title = stringResource(R.string.learn_score_title),
-      body = stringResource(R.string.learn_score_body),
-    )
-    LearnCard(
-      title = stringResource(R.string.learn_metric_difference_title),
-      body = stringResource(R.string.learn_metric_difference_body),
-    )
-    LearnCard(
-      title = stringResource(R.string.learn_calibration_title),
-      body = stringResource(R.string.learn_calibration_body),
-    )
-    LearnCard(
-      title = stringResource(R.string.learn_artifact_calibration_title),
-      body = stringResource(R.string.learn_artifact_calibration_body),
-    )
-    LearnCard(
-      title = stringResource(R.string.learn_caveat_title),
-      body = stringResource(R.string.learn_caveat_body),
-    )
+    Panel {
+      Text(stringResource(R.string.learn_mode_title), fontWeight = FontWeight.SemiBold)
+      Spacer(Modifier.height(8.dp))
+      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        CompactActionButton(
+          label = stringResource(R.string.learn_mode_metrics),
+          enabled = true,
+          filled = viewMode == LearnViewMode.METRICS,
+          onClick = { viewMode = LearnViewMode.METRICS },
+        )
+        CompactActionButton(
+          label = stringResource(R.string.learn_mode_foundations),
+          enabled = true,
+          filled = viewMode == LearnViewMode.FOUNDATIONS,
+          onClick = { viewMode = LearnViewMode.FOUNDATIONS },
+        )
+      }
+    }
 
-    MetricGlossary.learnEntries().forEach { entry ->
+    if (viewMode == LearnViewMode.METRICS) {
       LearnCard(
-        title = "${entry.plainName} (${entry.abbreviation})",
-        body = buildString {
-          append(entry.shortMeaning)
-          append("\n\n")
-          append("What usually raises it: ")
-          append(entry.drivers)
-          append("\n\n")
-          append(entry.longMeaning)
-          append("\n\nFormula: ")
-          append(entry.displayFormula)
-          if (entry.terms.isNotEmpty()) {
-            append("\n\nTerms:")
-            entry.terms.forEach { term ->
-              append("\n- ")
-              append(term.label)
-              append(": ")
-              append(term.meaning)
-            }
+        title = stringResource(R.string.learn_how_metrics_title),
+        body = stringResource(R.string.learn_how_metrics_body),
+      )
+
+      LearnCard(
+        title = stringResource(R.string.learn_eeg_assumptions_title),
+        body = stringResource(R.string.learn_eeg_assumptions_body),
+      )
+
+      Panel {
+        Text(stringResource(R.string.learn_select_metric_title), fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(8.dp))
+        FlowRow(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+          verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+          MetricGlossary.learnEntries().forEach { entry ->
+            CompactActionButton(
+              label = entry.abbreviation,
+              enabled = true,
+              filled = selectedMetric == entry.type,
+              onClick = { selectedMetricName = entry.type.name },
+            )
           }
         }
+      }
+
+      Panel {
+        Text(
+          stringResource(R.string.learn_metric_details_title, selectedEntry.plainName, selectedEntry.abbreviation),
+          fontWeight = FontWeight.SemiBold,
+        )
+        Spacer(Modifier.height(8.dp))
+        MetricExplainer(selectedEntry)
+        Spacer(Modifier.height(8.dp))
+        Text(selectedEntry.longMeaning, style = MaterialTheme.typography.bodySmall)
+        if (selectedEntry.interpretiveNote.isNotEmpty()) {
+          Spacer(Modifier.height(8.dp))
+          Text(
+            stringResource(R.string.learn_interpretive_note_title),
+            fontWeight = FontWeight.SemiBold,
+            style = MaterialTheme.typography.bodySmall,
+          )
+          Text(selectedEntry.interpretiveNote, style = MaterialTheme.typography.bodySmall)
+        }
+      }
+    } else {
+      LearnCard(
+        title = stringResource(R.string.learn_samatha_title),
+        body = stringResource(R.string.learn_samatha_body),
+      )
+      LearnCard(
+        title = stringResource(R.string.learn_score_title),
+        body = stringResource(R.string.learn_score_body),
+      )
+      LearnCard(
+        title = stringResource(R.string.learn_metric_difference_title),
+        body = stringResource(R.string.learn_metric_difference_body),
+      )
+      LearnCard(
+        title = stringResource(R.string.learn_calibration_title),
+        body = stringResource(R.string.learn_calibration_body),
+      )
+      LearnCard(
+        title = stringResource(R.string.learn_artifact_calibration_title),
+        body = stringResource(R.string.learn_artifact_calibration_body),
+      )
+      LearnCard(
+        title = stringResource(R.string.learn_caveat_title),
+        body = stringResource(R.string.learn_caveat_body),
       )
     }
 

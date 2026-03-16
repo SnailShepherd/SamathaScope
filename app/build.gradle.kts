@@ -16,10 +16,15 @@ android {
     versionName = "0.7"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+    buildConfigField("boolean", "FEATURE_SKY_TOWER_COLLAPSE_MODE", "true")
+    buildConfigField("boolean", "FEATURE_INK_BRUSH_PRESET_ENGINE", "true")
+    buildConfigField("boolean", "FEATURE_INK_MAGICAL_EFFECTS", "true")
   }
 
   buildFeatures {
     compose = true
+    buildConfig = true
   }
 
   sourceSets {

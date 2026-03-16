@@ -73,12 +73,15 @@ func _draw_blossom(blossom: Dictionary, reveal: float) -> void:
 
 func _draw_tip_pools() -> void:
 	var intensity: float = float(_state.get("intensity", 0.0))
+	var brush_profile: Dictionary = _composition.get("brush_profile", {})
+	var pooling_bias: float = float(brush_profile.get("pooling", 1.0))
 	if _tips.is_empty():
 		return
-	for tip_index in range(min(_tips.size(), 5)):
+	for tip_index in range(min(_tips.size(), 4)):
 		var tip: Vector2 = _tips[tip_index]
-		var droplet_radius: float = 2.2 + intensity * 1.8 + float(tip_index % 2) * 0.5
+		var droplet_radius: float = (2.0 + intensity * 1.8 + float(tip_index % 2) * 0.5) * clamp(0.82 + pooling_bias * 0.30, 0.80, 1.36)
 		draw_circle(tip + Vector2(0.0, 1.8 + tip_index), droplet_radius, Color(0.07, 0.07, 0.07, 0.10))
+		draw_circle(tip + Vector2(0.0, 0.8 + tip_index * 0.4), droplet_radius * 0.52, Color(0.12, 0.11, 0.10, 0.06))
 
 func _draw_seal() -> void:
 	var seal: Dictionary = _composition.get("seal", {})

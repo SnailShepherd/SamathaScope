@@ -81,6 +81,7 @@ Derived features:
 - blink/transient rate from robust outlier peaks in raw data
 - clip fraction
 - line-noise ratio near `50 Hz`
+  - computed from the raw spectrum so quality checks stay notch-independent
 - max gap / stall statistic
 
 ## Calibration flow
@@ -132,7 +133,8 @@ Component scores:
 
 ```text
 contact = clamp01(poorSignal / 50)
-emg = clamp01((hfRatio - 0.10) / personalizedEmgUpper)
+lineNoise = clamp01(lineNoiseRatio * 5)
+emg = clamp01((hfRatio - 0.10) / personalizedEmgSpan)
 blink = clamp01(blinkRateHz / personalizedBlinkUpper)
 clip = clamp01(clipFraction / 0.01)
 stall = clamp01(maxGapMs / 500)
@@ -143,12 +145,13 @@ Personalized upper bounds:
 ```text
 personalizedBlinkUpper = max(1.0, artefactProfile.blinkNormalizationHz)
 personalizedEmgUpper = max(0.35, artefactProfile.emgNormalizationHfRatio)
+personalizedEmgSpan = max(0.15, personalizedEmgUpper - 0.10)
 ```
 
 Total artefact score:
 
 ```text
-ArtefactScore = 0.30*contact + 0.25*emg + 0.20*blink + 0.15*clip + 0.10*stall
+ArtefactScore = 0.30*contact + 0.10*lineNoise + 0.25*emg + 0.16*blink + 0.12*clip + 0.10*stall
 QualityConfidence = 1 - ArtefactScore
 ```
 

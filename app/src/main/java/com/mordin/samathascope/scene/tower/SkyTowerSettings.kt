@@ -12,6 +12,7 @@ data class SkyTowerSettings(
   val baseWidthScale: Float = DEFAULT_BASE_WIDTH_SCALE,
   val carrierSpeedMultiplier: Float = DEFAULT_CARRIER_SPEED_MULTIPLIER,
   val irregularity: Float = DEFAULT_IRREGULARITY,
+  val collapseEnabled: Boolean = DEFAULT_COLLAPSE_ENABLED,
 ) {
   fun clamped(): SkyTowerSettings {
     return copy(
@@ -29,6 +30,7 @@ data class SkyTowerSettings(
     const val DEFAULT_BASE_WIDTH_SCALE = 0.79f
     const val DEFAULT_CARRIER_SPEED_MULTIPLIER = 1.28f
     const val DEFAULT_IRREGULARITY = 0.58f
+    const val DEFAULT_COLLAPSE_ENABLED = true
   }
 }
 

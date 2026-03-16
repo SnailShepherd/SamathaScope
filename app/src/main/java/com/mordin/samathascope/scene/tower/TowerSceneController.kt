@@ -52,6 +52,10 @@ class TowerSceneController {
   private var cameraShake = 0f
   private var ambientWobble = 0f
   private var dustBursts = emptyList<TowerDustBurst>()
+  private var collapseEnabled = true
+  private var consecutiveMisses = 0
+  private var collapseInProgress = false
+  private var collapseAccumulatorSeconds = 0f
   private var lastSnapshot = TowerRenderSnapshot(
     bodies = emptyList(),
     carrier = TowerCarrierState(),
@@ -65,6 +69,7 @@ class TowerSceneController {
   fun reset(settings: SkyTowerSettings = this.settings) {
     this.settings = settings.clamped()
     resolvedSettings = resolveSkyTowerSettings(this.settings)
+    collapseEnabled = this.settings.collapseEnabled
     physics.reset(this.settings)
     accumulatorSeconds = 0f
     elapsedSeconds = 0f
@@ -78,6 +83,9 @@ class TowerSceneController {
     cameraShake = 0f
     ambientWobble = 0f
     dustBursts = emptyList()
+    consecutiveMisses = 0
+    collapseInProgress = false
+    collapseAccumulatorSeconds = 0f
     val initialResult = physics.step(SceneState(), 0f)
     lastSnapshot = TowerRenderSnapshot(
       bodies = initialResult.bodies,
@@ -162,6 +170,25 @@ class TowerSceneController {
       lastSnapshot = buildSnapshot(result)
     }
 
+    if (collapseInProgress) {
+      collapseAccumulatorSeconds += dtSeconds
+      if (collapseAccumulatorSeconds >= COLLAPSE_STEP_SECONDS) {
+        collapseAccumulatorSeconds -= COLLAPSE_STEP_SECONDS
+        if (physics.removeTopSettledStone()) {
+          dustBursts = (dustBursts + TowerDustBurst(
+            x = 5f,
+            y = 3.2f,
+            radius = 0.28f,
+            alpha = 0.50f,
+          )).takeLast(18)
+        } else {
+          collapseInProgress = false
+          consecutiveMisses = 0
+          spawnCooldownSeconds = 0.40f
+        }
+      }
+    }
+
     dustBursts = dustBursts.map {
       it.copy(
         radius = it.radius + (dtSeconds * 0.52f),
@@ -203,11 +230,19 @@ class TowerSceneController {
     }
     if (result.activeSettled) {
       placements += 1
+      consecutiveMisses = 0
       spawnCooldownSeconds = 0.22f
     }
     if (result.activeFailed) {
       misses += 1
       spawnCooldownSeconds = 0.20f
+      if (collapseEnabled && !collapseInProgress) {
+        consecutiveMisses += 1
+        if (consecutiveMisses >= 3) {
+          collapseInProgress = true
+          collapseAccumulatorSeconds = 0f
+        }
+      }
     }
   }
 
@@ -244,5 +279,6 @@ class TowerSceneController {
     private const val CARRIER_MIN_X = 2.35f
     private const val CARRIER_MAX_X = 7.65f
     const val FIXED_TIMESTEP_SECONDS = 1f / 60f
+    private const val COLLAPSE_STEP_SECONDS = 0.35f
   }
 }
