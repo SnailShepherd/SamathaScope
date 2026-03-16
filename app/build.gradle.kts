@@ -12,12 +12,12 @@ android {
     applicationId = "com.mordin.samathascope"
     minSdk = 26
     targetSdk = 35
-    versionCode = 7
-    versionName = "0.7"
+    versionCode = 8
+    versionName = "0.72"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-    buildConfigField("boolean", "FEATURE_SKY_TOWER_COLLAPSE_MODE", "true")
+    buildConfigField("boolean", "FEATURE_SKY_TOWER_COLLAPSE_MODE", "false")
     buildConfigField("boolean", "FEATURE_INK_BRUSH_PRESET_ENGINE", "true")
     buildConfigField("boolean", "FEATURE_INK_MAGICAL_EFFECTS", "true")
   }

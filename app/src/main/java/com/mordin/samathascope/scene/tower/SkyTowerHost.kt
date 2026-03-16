@@ -98,15 +98,20 @@ fun SkyTowerHost(
     }
   }
 
+  val latestInputEnabled by rememberUpdatedState(inputEnabled)
+  val onTap = remember {
+    { 
+      if (latestInputEnabled && !latestPaused) {
+        pendingTaps += 1
+      }
+    }
+  }
+
   TowerRenderer(
     snapshot = snapshot,
     inputEnabled = inputEnabled,
     running = running,
     paused = paused,
-    onTap = {
-      if (inputEnabled && !latestPaused) {
-        pendingTaps += 1
-      }
-    },
+    onTap = onTap,
   )
 }

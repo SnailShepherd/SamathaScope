@@ -2,7 +2,9 @@ package com.mordin.samathascope
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -61,5 +63,74 @@ class AppUiTest {
     composeRule.onNodeWithText("Fire Keeper").performScrollTo().performClick()
     composeRule.onNodeWithText("Start Fire Keeper").performScrollTo().assertIsDisplayed()
     composeRule.onNodeWithText("Fire Keeper guide").performScrollTo().assertIsDisplayed()
+  }
+
+  @Test
+  fun skyTower_smokeTestWithDebugLoop() {
+    // 1. Enable debug replay on dashboard
+    composeRule.onNodeWithText("Dashboard").performClick()
+    composeRule.waitForIdle()
+    composeRule.waitUntil(timeoutMillis = 5000) {
+      composeRule.onAllNodesWithTag("dashboard_debug_raw_replay_toggle")
+        .fetchSemanticsNodes().isNotEmpty()
+    }
+    composeRule.onNodeWithTag("dashboard_debug_raw_replay_toggle").performClick()
+
+    // 2. Wait for EEG stream to init (eegStreamReady needs ~1-2s)
+    Thread.sleep(3000)
+    composeRule.waitForIdle()
+
+    // 3. Start session (button should now be enabled)
+    composeRule.onNodeWithTag("dashboard_start_session").performClick()
+    composeRule.waitForIdle()
+
+    // 4. Let calibration run for ~10 seconds
+    Thread.sleep(10_000)
+    composeRule.waitForIdle()
+
+    // 5. Skip calibration
+    val skipCalibrationNodes = composeRule.onAllNodesWithTag("dashboard_skip_calibration")
+      .fetchSemanticsNodes()
+    if (skipCalibrationNodes.isNotEmpty()) {
+      composeRule.onNodeWithTag("dashboard_skip_calibration").performClick()
+      composeRule.waitForIdle()
+      Thread.sleep(2000)
+      composeRule.waitForIdle()
+    }
+
+    // 6. Skip artefact calibration if prompted
+    val artefactNodes = composeRule.onAllNodesWithTag("dashboard_skip_artefact_calibration")
+      .fetchSemanticsNodes()
+    if (artefactNodes.isNotEmpty()) {
+      composeRule.onNodeWithTag("dashboard_skip_artefact_calibration").performClick()
+      composeRule.waitForIdle()
+      Thread.sleep(1000)
+      composeRule.waitForIdle()
+    }
+
+    // 7. Navigate to Game tab → Sky Tower is default
+    composeRule.onNodeWithText("Game").performClick()
+    composeRule.waitForIdle()
+    Thread.sleep(1000)
+    composeRule.waitForIdle()
+
+    // 8. Start sky tower
+    composeRule.waitUntil(timeoutMillis = 5000) {
+      composeRule.onAllNodesWithTag("game_primary_action")
+        .fetchSemanticsNodes().isNotEmpty()
+    }
+    composeRule.onNodeWithTag("game_primary_action").performClick()
+    composeRule.waitForIdle()
+    Thread.sleep(2000)
+
+    // 8. Tap the canvas 20 times to drop stones
+    repeat(20) {
+      composeRule.onNodeWithTag("sky_tower_canvas").performClick()
+      Thread.sleep(700)
+    }
+
+    // 9. Verify the tower has grown
+    Thread.sleep(1000)
+    composeRule.onNodeWithTag("sky_tower_height").assertIsDisplayed()
   }
 }

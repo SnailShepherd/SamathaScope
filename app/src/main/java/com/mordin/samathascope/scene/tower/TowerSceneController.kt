@@ -1,10 +1,10 @@
 package com.mordin.samathascope.scene.tower
 
-import com.mordin.samathascope.approach
 import com.mordin.samathascope.clamp01
 import com.mordin.samathascope.scene.SceneState
 import com.mordin.samathascope.scene.SceneSummary
 import kotlin.math.abs
+import kotlin.math.min
 import kotlin.math.sin
 
 data class TowerCarrierState(
@@ -49,13 +49,8 @@ class TowerSceneController {
   private var placements = 0
   private var misses = 0
   private var impactFlash = 0f
-  private var cameraShake = 0f
-  private var ambientWobble = 0f
   private var dustBursts = emptyList<TowerDustBurst>()
-  private var collapseEnabled = true
-  private var consecutiveMisses = 0
-  private var collapseInProgress = false
-  private var collapseAccumulatorSeconds = 0f
+  private var currentTopY = TowerPhysics.FOUNDATION_Y
   private var lastSnapshot = TowerRenderSnapshot(
     bodies = emptyList(),
     carrier = TowerCarrierState(),
@@ -69,7 +64,6 @@ class TowerSceneController {
   fun reset(settings: SkyTowerSettings = this.settings) {
     this.settings = settings.clamped()
     resolvedSettings = resolveSkyTowerSettings(this.settings)
-    collapseEnabled = this.settings.collapseEnabled
     physics.reset(this.settings)
     accumulatorSeconds = 0f
     elapsedSeconds = 0f
@@ -80,12 +74,8 @@ class TowerSceneController {
     placements = 0
     misses = 0
     impactFlash = 0f
-    cameraShake = 0f
-    ambientWobble = 0f
     dustBursts = emptyList()
-    consecutiveMisses = 0
-    collapseInProgress = false
-    collapseAccumulatorSeconds = 0f
+    currentTopY = TowerPhysics.FOUNDATION_Y
     val initialResult = physics.step(SceneState(), 0f)
     lastSnapshot = TowerRenderSnapshot(
       bodies = initialResult.bodies,
@@ -121,7 +111,10 @@ class TowerSceneController {
     elapsedSeconds += dtSeconds
     accumulatorSeconds += dtSeconds
     spawnCooldownSeconds = (spawnCooldownSeconds - dtSeconds).coerceAtLeast(0f)
-    ambientWobble = approach(ambientWobble, sceneState.artefact, dtSeconds * 1.9f)
+
+    // Dynamic carrier Y: hover above the current tower top
+    val dynamicCarrierY = min(currentTopY - CARRIER_GAP_ABOVE_TOWER, CARRIER_Y_DEFAULT)
+    val dynamicReleaseY = dynamicCarrierY + 0.19f
 
     val carrierWave = sin(
       (elapsedSeconds * (0.82f + (abs(sceneState.drift) * 0.70f) + (sceneState.artefact * 0.30f))).toDouble()
@@ -150,7 +143,7 @@ class TowerSceneController {
       val releaseJitter = sin((elapsedSeconds * 5.4f).toDouble()).toFloat()
       physics.spawnReleasedBlock(
         x = carrierX,
-        y = RELEASE_Y,
+        y = dynamicReleaseY,
         shape = previewShape,
         linearVelocityX = carrierDirection * (
           0.02f +
@@ -166,27 +159,9 @@ class TowerSceneController {
     while (accumulatorSeconds >= FIXED_TIMESTEP_SECONDS) {
       val result = physics.step(sceneState, FIXED_TIMESTEP_SECONDS)
       accumulatorSeconds -= FIXED_TIMESTEP_SECONDS
+      currentTopY = result.topY
       handlePhysicsResult(result)
-      lastSnapshot = buildSnapshot(result)
-    }
-
-    if (collapseInProgress) {
-      collapseAccumulatorSeconds += dtSeconds
-      if (collapseAccumulatorSeconds >= COLLAPSE_STEP_SECONDS) {
-        collapseAccumulatorSeconds -= COLLAPSE_STEP_SECONDS
-        if (physics.removeTopSettledStone()) {
-          dustBursts = (dustBursts + TowerDustBurst(
-            x = 5f,
-            y = 3.2f,
-            radius = 0.28f,
-            alpha = 0.50f,
-          )).takeLast(18)
-        } else {
-          collapseInProgress = false
-          consecutiveMisses = 0
-          spawnCooldownSeconds = 0.40f
-        }
-      }
+      lastSnapshot = buildSnapshot(result, dynamicCarrierY)
     }
 
     dustBursts = dustBursts.map {
@@ -196,15 +171,13 @@ class TowerSceneController {
       )
     }.filter { it.alpha > 0.03f }
 
-    impactFlash = approach(impactFlash, 0f, dtSeconds * 4.8f)
-    cameraShake = approach(cameraShake, 0f, dtSeconds * 5.4f)
-    val ambientCameraX = sin((elapsedSeconds * (3.3f + ambientWobble * 4.2f)).toDouble()).toFloat() * ambientWobble * 0.018f
-    val ambientCameraY = sin((elapsedSeconds * (2.5f + ambientWobble * 3.0f)).toDouble()).toFloat() * ambientWobble * 0.012f
+    impactFlash = (impactFlash - dtSeconds * 4.8f).coerceAtLeast(0f)
+
     return lastSnapshot.copy(
       dustBursts = dustBursts,
       impactFlash = impactFlash,
-      cameraOffsetX = sin((elapsedSeconds * 40f).toDouble()).toFloat() * cameraShake * 0.07f + ambientCameraX,
-      cameraOffsetY = sin((elapsedSeconds * 28f).toDouble()).toFloat() * cameraShake * 0.05f + ambientCameraY,
+      cameraOffsetX = 0f,
+      cameraOffsetY = 0f,
     )
   }
 
@@ -226,31 +199,25 @@ class TowerSceneController {
         )
         ).takeLast(18)
       impactFlash = clamp01(maxOf(impactFlash, 0.28f + (event.intensity * 0.44f)))
-      cameraShake = clamp01(maxOf(cameraShake, 0.10f + (event.intensity * 0.22f)))
     }
     if (result.activeSettled) {
       placements += 1
-      consecutiveMisses = 0
       spawnCooldownSeconds = 0.22f
     }
     if (result.activeFailed) {
       misses += 1
       spawnCooldownSeconds = 0.20f
-      if (collapseEnabled && !collapseInProgress) {
-        consecutiveMisses += 1
-        if (consecutiveMisses >= 3) {
-          collapseInProgress = true
-          collapseAccumulatorSeconds = 0f
-        }
-      }
     }
   }
 
-  private fun buildSnapshot(result: TowerPhysicsStepResult): TowerRenderSnapshot {
+  private fun buildSnapshot(
+    result: TowerPhysicsStepResult,
+    carrierY: Float = CARRIER_Y_DEFAULT,
+  ): TowerRenderSnapshot {
     val towerHeight = result.bodies.count { it.id != 0 }
     return TowerRenderSnapshot(
       bodies = result.bodies,
-      carrier = carrierState(visible = !physics.hasActiveBody()),
+      carrier = carrierState(visible = !physics.hasActiveBody(), carrierY = carrierY),
       dustBursts = dustBursts,
       impactFlash = impactFlash,
       cameraOffsetX = 0f,
@@ -259,11 +226,14 @@ class TowerSceneController {
     )
   }
 
-  private fun carrierState(visible: Boolean = true): TowerCarrierState {
+  private fun carrierState(
+    visible: Boolean = true,
+    carrierY: Float = CARRIER_Y_DEFAULT,
+  ): TowerCarrierState {
     val previewShape = physics.previewNextBlockShape()
     return TowerCarrierState(
       x = carrierX,
-      y = CARRIER_Y,
+      y = carrierY,
       width = previewShape.width,
       height = previewShape.height,
       shapeKind = previewShape.kind,
@@ -274,11 +244,10 @@ class TowerSceneController {
   }
 
   companion object {
-    private const val CARRIER_Y = 2.05f
-    private const val RELEASE_Y = 2.24f
+    private const val CARRIER_Y_DEFAULT = 2.05f
+    private const val CARRIER_GAP_ABOVE_TOWER = 2.0f
     private const val CARRIER_MIN_X = 2.35f
     private const val CARRIER_MAX_X = 7.65f
     const val FIXED_TIMESTEP_SECONDS = 1f / 60f
-    private const val COLLAPSE_STEP_SECONDS = 0.35f
   }
 }

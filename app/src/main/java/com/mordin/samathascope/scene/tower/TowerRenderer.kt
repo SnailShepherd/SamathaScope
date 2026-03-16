@@ -1,7 +1,9 @@
 package com.mordin.samathascope.scene.tower
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -44,19 +46,6 @@ fun TowerRenderer(
   paused: Boolean,
   onTap: () -> Unit,
 ) {
-  val statusLine = when {
-    !running -> "Press Start to begin Sky Tower."
-    paused -> "Paused. Resume when you're ready."
-    !inputEnabled -> "Signal input is locked right now."
-    snapshot.carrier.visible -> "Tap to drop a composite stone."
-    else -> "Let the tower wobble, grip, and settle."
-  }
-  val detailLine = when {
-    !running -> "Stack painterly stones that flex like a spring instead of a rigid pillar."
-    paused -> "The tower keeps its spring memory between drops."
-    snapshot.carrier.visible -> "Friction and the contained playfield hold the stack together while artefact score drives the wobble."
-    else -> "Higher artefact makes the stack twitchier and slower to recover."
-  }
 
   Box(
     modifier = Modifier
@@ -64,7 +53,13 @@ fun TowerRenderer(
       .height(320.dp)
       .testTag("sky_tower_canvas")
       .pointerInput(onTap) {
-        detectTapGestures(onTap = { onTap() })
+        awaitEachGesture {
+          val down = awaitFirstDown()
+          down.consume()
+          val up = waitForUpOrCancellation()
+          up?.consume()
+          if (up != null) onTap()
+        }
       },
   ) {
     Box(
@@ -96,23 +91,6 @@ fun TowerRenderer(
       style = MaterialTheme.typography.labelLarge,
       color = Color(0xFF6A5C4C),
     )
-    Text(
-      text = statusLine,
-      modifier = Modifier
-        .align(Alignment.BottomStart)
-        .testTag("sky_tower_status")
-        .padding(start = 18.dp, end = 18.dp, bottom = 34.dp),
-      style = MaterialTheme.typography.bodyMedium,
-      color = Color(0xFF43362D),
-    )
-    Text(
-      text = detailLine,
-      modifier = Modifier
-        .align(Alignment.BottomStart)
-        .padding(start = 18.dp, end = 18.dp, bottom = 14.dp),
-      style = MaterialTheme.typography.bodySmall,
-      color = Color(0xFF6B5C4A),
-    )
   }
 }
 
@@ -120,8 +98,27 @@ private fun DrawScope.drawTowerScene(snapshot: TowerRenderSnapshot) {
   val highestTop = snapshot.bodies
     .filter { it.id != 0 }
     .minOfOrNull { it.y - (it.height * 0.5f) } ?: 9.7f
-  val worldTop = (highestTop - 2.4f).coerceIn(0.3f, 1.4f)
-  val worldBottom = 12.8f
+
+  // Viewport height stays constant; it scrolls up when the tower exceeds 60% of view
+  val viewportHeight = VIEWPORT_HEIGHT
+  val defaultWorldBottom = 12.8f
+  val defaultWorldTop = defaultWorldBottom - viewportHeight
+
+  // Tower height in world units from foundation down to highest stone
+  val towerWorldHeight = TowerPhysics.FOUNDATION_Y - highestTop
+  val viewThreshold = viewportHeight * SINK_THRESHOLD_RATIO
+
+  val worldTop: Float
+  val worldBottom: Float
+  if (towerWorldHeight > viewThreshold) {
+    // Scroll up: keep the highest stone visible with margin
+    worldTop = (highestTop - 2.4f).coerceAtMost(defaultWorldTop)
+    worldBottom = worldTop + viewportHeight
+  } else {
+    worldTop = defaultWorldTop
+    worldBottom = defaultWorldBottom
+  }
+
   val worldLeft = 0.5f
   val worldRight = 9.5f
   val viewport = TowerViewport(
@@ -151,11 +148,18 @@ private fun DrawScope.drawTowerScene(snapshot: TowerRenderSnapshot) {
     drawGround(viewport)
     drawDust(snapshot, viewport)
 
-    val bodies = snapshot.bodies.sortedWith(
-      compareBy<TowerBodySnapshot> { it.id == 0 }
-        .thenByDescending { it.y }
-        .thenBy { it.id }
-    )
+    val bodies = snapshot.bodies
+      .filter { body ->
+        // Cull bodies that are entirely outside the viewport (with margin)
+        val bodyTop = body.y - body.height
+        val bodyBottom = body.y + body.height
+        bodyBottom >= worldTop - 1f && bodyTop <= worldBottom + 1f
+      }
+      .sortedWith(
+        compareBy<TowerBodySnapshot> { it.id == 0 }
+          .thenByDescending { it.y }
+          .thenBy { it.id }
+      )
     bodies.forEach { body ->
       val shadowLift = if (body.active) 1.25f else 0.78f
       drawStoneShadow(body, viewport, shadowLift)
@@ -611,3 +615,6 @@ private data class StonePalette(
   val moss: Color,
   val ink: Color,
 )
+
+private const val VIEWPORT_HEIGHT = 11.4f
+private const val SINK_THRESHOLD_RATIO = 0.60f

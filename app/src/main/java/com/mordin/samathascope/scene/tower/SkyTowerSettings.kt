@@ -3,8 +3,8 @@ package com.mordin.samathascope.scene.tower
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
-import kotlin.math.max
-import kotlin.math.min
+import kotlin.math.pow
+import kotlin.math.sign
 import kotlin.math.sin
 import kotlin.math.sqrt
 
@@ -49,11 +49,12 @@ data class TowerStoneLobe(
 
 enum class TowerBlockShapeKind {
   RECTANGLE,
-  RIVER_STONE,
-  PEBBLE_LEFT,
-  PEBBLE_RIGHT,
-  ROUNDED_SLAB,
-  ROUNDED_BOULDER,
+  RIVER_STONE_A,
+  RIVER_STONE_B,
+  RIVER_STONE_C,
+  RIVER_STONE_D,
+  RIVER_STONE_E,
+  RIVER_STONE_F,
 }
 
 data class TowerBlockShape(
@@ -74,26 +75,17 @@ data class TowerResolvedSettings(
   val irregularity: Float,
 )
 
-private data class StoneCompositeProfile(
+private data class RiverStoneProfile(
   val kind: TowerBlockShapeKind,
-  val preferredLobes: Int,
+  /** Superellipse exponent: 2=ellipse, higher=more rectangular/rounded-rect */
+  val exponent: Float,
+  /** Horizontal stretch factor (>1 means wider/flatter) */
+  val aspectStretch: Float,
+  /** Base squash: flatten the bottom half slightly (0=none, 1=full squash) */
+  val baseSquash: Float,
+  /** Left-right asymmetry bias (-1..1) */
   val asymmetryBias: Float,
-  val ridgeLift: Float,
-  val endDrop: Float,
-  val flattening: Float,
 )
-
-private data class TowerBounds(
-  val minX: Float,
-  val maxX: Float,
-  val minY: Float,
-  val maxY: Float,
-) {
-  val width: Float get() = maxX - minX
-  val height: Float get() = maxY - minY
-  val centerX: Float get() = (minX + maxX) * 0.5f
-  val centerY: Float get() = (minY + maxY) * 0.5f
-}
 
 private data class TowerSupportSpan(
   val centerX: Float,
@@ -129,16 +121,16 @@ internal fun createTowerBlockShape(
     )
   }
 
-  val widthVariance = centeredNoise(blockIndex, salt = 7) * (0.18f * resolved.irregularity)
+  val widthVariance = centeredNoise(blockIndex, salt = 7) * (0.25f * resolved.irregularity)
   val targetWidth = (
     BASE_BLOCK_WIDTH * (1f + widthVariance)
-    ).coerceIn(BASE_BLOCK_WIDTH * 0.84f, BASE_BLOCK_WIDTH * 1.24f)
-  val heightVariance = stoneNoise(blockIndex, salt = 19) * (0.16f * resolved.irregularity)
+    ).coerceIn(BASE_BLOCK_WIDTH * 0.75f, BASE_BLOCK_WIDTH * 1.30f)
+  val heightVariance = stoneNoise(blockIndex, salt = 19) * (0.22f * resolved.irregularity)
   val targetHeight = (
-    TowerPhysics.BLOCK_HEIGHT * (0.94f + heightVariance)
-    ).coerceIn(TowerPhysics.BLOCK_HEIGHT * 0.92f, TowerPhysics.BLOCK_HEIGHT * 1.18f)
+    TowerPhysics.BLOCK_HEIGHT * (0.92f + heightVariance)
+    ).coerceIn(TowerPhysics.BLOCK_HEIGHT * 0.82f, TowerPhysics.BLOCK_HEIGHT * 1.26f)
   val profile = STONE_PROFILES[blockIndex.mod(STONE_PROFILES.size)]
-  return createCompositeStoneShape(
+  return createRiverStoneShape(
     blockIndex = blockIndex,
     profile = profile,
     targetWidth = targetWidth,
@@ -147,118 +139,79 @@ internal fun createTowerBlockShape(
   )
 }
 
-private fun createCompositeStoneShape(
+private fun createRiverStoneShape(
   blockIndex: Int,
-  profile: StoneCompositeProfile,
+  profile: RiverStoneProfile,
   targetWidth: Float,
   targetHeight: Float,
   irregularity: Float,
 ): TowerBlockShape {
-  val lobeCountOffset = (stoneNoise(blockIndex, salt = 41) * 3f).toInt() - 1
-  val lobeCount = (profile.preferredLobes + lobeCountOffset).coerceIn(2, 4)
-  val rawLobes = buildList {
-    for (lobeIndex in 0 until lobeCount) {
-      add(
-        createRawStoneLobe(
-          blockIndex = blockIndex,
-          lobeIndex = lobeIndex,
-          lobeCount = lobeCount,
-          profile = profile,
-          irregularity = irregularity,
-        )
-      )
+  val stretchFactor = profile.aspectStretch + centeredNoise(blockIndex, salt = 63) * (0.12f * irregularity)
+  val halfW = targetWidth * 0.5f * stretchFactor
+  val halfH = targetHeight * 0.5f
+  val exponent = (profile.exponent + centeredNoise(blockIndex, salt = 51) * (0.8f * irregularity)).coerceAtLeast(1.8f)
+
+  // Generate superellipse outline with organic wobble
+  val vertices = buildList {
+    for (i in 0 until SUPERELLIPSE_VERTEX_COUNT) {
+      val angle = (i.toFloat() / SUPERELLIPSE_VERTEX_COUNT) * (2.0 * PI).toFloat()
+      val cosA = cos(angle)
+      val sinA = sin(angle)
+
+      // Superellipse: |x/a|^n + |y/b|^n = 1  →  parametric form
+      val absC = abs(cosA)
+      val absS = abs(sinA)
+      val rx = sign(cosA) * absC.pow(2f / exponent) * halfW
+      var ry = sign(sinA) * absS.pow(2f / exponent) * halfH
+
+      // Flatten the bottom (sinA > 0 = bottom half in screen coords)
+      if (sinA > 0f) {
+        ry *= 1f - (sinA * profile.baseSquash * 0.65f)
+      }
+
+      // Asymmetry: shift the horizontal radius slightly left or right
+      val asymShift = profile.asymmetryBias * halfW * 0.06f * cosA
+
+      // Per-vertex wobble for organic feel
+      val wobbleAmp = irregularity * 0.03f * halfW
+      val wobble = centeredNoise(blockIndex * SUPERELLIPSE_VERTEX_COUNT + i, salt = 137) * wobbleAmp
+
+      val radialLen = sqrt(rx * rx + ry * ry).coerceAtLeast(0.001f)
+      val nx = rx / radialLen
+      val ny = ry / radialLen
+
+      add(TowerPoint(x = rx + asymShift + nx * wobble, y = ry + ny * wobble))
     }
   }
-  val rawBounds = boundsForLobes(rawLobes)
-  val scaleX = targetWidth / rawBounds.width.coerceAtLeast(0.001f)
-  val scaleY = targetHeight / rawBounds.height.coerceAtLeast(0.001f)
-  val centeredLobes = rawLobes.map { raw ->
-    val centerX = (raw.centerX - rawBounds.centerX) * scaleX
-    val centerY = (raw.centerY - rawBounds.centerY) * scaleY
-    val radiusX = raw.radiusX * scaleX
-    val radiusY = raw.radiusY * scaleY
-    TowerStoneLobe(
-      centerX = centerX,
-      centerY = centerY,
-      radiusX = radiusX,
-      radiusY = radiusY,
-      fixtureVertices = ellipseVertices(
-        centerX = centerX,
-        centerY = centerY,
-        radiusX = radiusX,
-        radiusY = radiusY,
-      ),
-    )
-  }
-  val centeredBounds = boundsForLobes(centeredLobes)
-  val outline = sampleUnionOutline(centeredLobes, centeredBounds)
-  val topProbeY = centeredBounds.minY + (centeredBounds.height * 0.24f)
-  val bottomProbeY = centeredBounds.maxY - (centeredBounds.height * 0.22f)
-  val topSpan = supportSpanAtY(centeredLobes, topProbeY, centeredBounds.width)
-  val bottomSpan = supportSpanAtY(centeredLobes, bottomProbeY, centeredBounds.width)
 
+  val outline = ensureCounterClockwise(vertices)
+
+  // Compute support spans by probing the outline at top/bottom bands
+  val topProbeY = -halfH * 0.52f
+  val bottomProbeY = halfH * 0.48f
+  val topSpan = supportSpanFromOutline(outline, topProbeY, halfW * 2f)
+  val bottomSpan = supportSpanFromOutline(outline, bottomProbeY, halfW * 2f)
+
+  // Build a single lobe that covers the full stone for painterly rendering
+  val lobe = TowerStoneLobe(
+    centerX = 0f,
+    centerY = 0f,
+    radiusX = halfW,
+    radiusY = halfH,
+    fixtureVertices = outline,
+  )
+
+  val adjustedWidth = halfW * 2f
   return TowerBlockShape(
     kind = profile.kind,
-    width = centeredBounds.width,
-    height = centeredBounds.height,
+    width = adjustedWidth,
+    height = targetHeight,
     localVertices = outline,
-    lobes = centeredLobes,
-    topSupportWidth = topSpan.width,
-    bottomSupportWidth = bottomSpan.width,
+    lobes = listOf(lobe),
+    topSupportWidth = topSpan.width.coerceAtMost(adjustedWidth),
+    bottomSupportWidth = bottomSpan.width.coerceAtMost(adjustedWidth),
     topSupportOffsetX = topSpan.centerX,
     bottomSupportOffsetX = bottomSpan.centerX,
-  )
-}
-
-private fun createRawStoneLobe(
-  blockIndex: Int,
-  lobeIndex: Int,
-  lobeCount: Int,
-  profile: StoneCompositeProfile,
-  irregularity: Float,
-): TowerStoneLobe {
-  val progress = if (lobeCount == 1) {
-    0.5f
-  } else {
-    lobeIndex / (lobeCount - 1f)
-  }
-  val arc = progress - 0.5f
-  val spread = when (lobeCount) {
-    2 -> 0.44f
-    3 -> 0.60f
-    else -> 0.72f
-  }
-  val radiusXBase = when (lobeCount) {
-    2 -> 0.34f
-    3 -> 0.27f
-    else -> 0.22f
-  }
-  val widthNoise = stoneNoise(blockIndex + lobeIndex, salt = 73)
-  val heightNoise = stoneNoise(blockIndex + lobeIndex, salt = 89)
-  val centerJitter = centeredNoise(blockIndex + lobeIndex, salt = 97) * (0.03f + (irregularity * 0.05f))
-  val centerX = (
-    arc * spread +
-      centerJitter +
-      (profile.asymmetryBias * 0.08f)
-    ).coerceIn(-0.52f, 0.52f)
-  val centerY = (
-    (abs(arc) * profile.endDrop * 0.12f) -
-      (profile.ridgeLift * 0.05f) +
-      centeredNoise(blockIndex + lobeIndex, salt = 113) * (0.02f + irregularity * 0.05f)
-    ).coerceIn(-0.28f, 0.28f)
-  val radiusX = (
-    radiusXBase * (0.94f + widthNoise * 0.30f)
-    ).coerceIn(0.16f, 0.40f)
-  val radiusY = (
-    (0.34f - (profile.flattening * 0.04f) + (heightNoise * 0.08f)) *
-      (0.90f + (profile.ridgeLift * 0.05f) - (abs(arc) * profile.endDrop * 0.08f))
-    ).coerceIn(0.22f, 0.42f)
-  return TowerStoneLobe(
-    centerX = centerX,
-    centerY = centerY,
-    radiusX = radiusX,
-    radiusY = radiusY,
-    fixtureVertices = emptyList(),
   )
 }
 
@@ -279,120 +232,6 @@ internal fun rectangleShape(
   )
 }
 
-private fun boundsForLobes(lobes: List<TowerStoneLobe>): TowerBounds {
-  val minX = lobes.minOf { it.centerX - it.radiusX }
-  val maxX = lobes.maxOf { it.centerX + it.radiusX }
-  val minY = lobes.minOf { it.centerY - it.radiusY }
-  val maxY = lobes.maxOf { it.centerY + it.radiusY }
-  return TowerBounds(minX = minX, maxX = maxX, minY = minY, maxY = maxY)
-}
-
-private fun sampleUnionOutline(
-  lobes: List<TowerStoneLobe>,
-  bounds: TowerBounds,
-): List<TowerPoint> {
-  val top = buildList {
-    for (sampleIndex in 0..OUTLINE_SAMPLE_COUNT) {
-      val progress = sampleIndex / OUTLINE_SAMPLE_COUNT.toFloat()
-      val x = lerp(bounds.minX, bounds.maxX, progress)
-      val extrema = yExtremaAtX(lobes, x) ?: continue
-      add(TowerPoint(x = x, y = extrema.first))
-    }
-  }
-  val bottom = buildList {
-    for (sampleIndex in OUTLINE_SAMPLE_COUNT downTo 0) {
-      val progress = sampleIndex / OUTLINE_SAMPLE_COUNT.toFloat()
-      val x = lerp(bounds.minX, bounds.maxX, progress)
-      val extrema = yExtremaAtX(lobes, x) ?: continue
-      add(TowerPoint(x = x, y = extrema.second))
-    }
-  }
-  val combined = (top + bottom).distinct()
-  return ensureCounterClockwise(
-    if (combined.size >= 6) combined else {
-      listOf(
-        TowerPoint(bounds.minX, bounds.minY),
-        TowerPoint(bounds.maxX, bounds.minY),
-        TowerPoint(bounds.maxX, bounds.maxY),
-        TowerPoint(bounds.minX, bounds.maxY),
-      )
-    }
-  )
-}
-
-private fun yExtremaAtX(
-  lobes: List<TowerStoneLobe>,
-  x: Float,
-): Pair<Float, Float>? {
-  var top = Float.POSITIVE_INFINITY
-  var bottom = Float.NEGATIVE_INFINITY
-  for (lobe in lobes) {
-    val normalizedX = (x - lobe.centerX) / lobe.radiusX
-    if (abs(normalizedX) > 1f) continue
-    val yFactor = sqrt((1f - (normalizedX * normalizedX)).coerceAtLeast(0f))
-    val topY = lobe.centerY - (lobe.radiusY * yFactor)
-    val bottomY = lobe.centerY + (lobe.radiusY * yFactor)
-    top = min(top, topY)
-    bottom = max(bottom, bottomY)
-  }
-  if (top == Float.POSITIVE_INFINITY || bottom == Float.NEGATIVE_INFINITY) {
-    return null
-  }
-  return top to bottom
-}
-
-private fun supportSpanAtY(
-  lobes: List<TowerStoneLobe>,
-  y: Float,
-  overallWidth: Float,
-): TowerSupportSpan {
-  val intervals = lobes.mapNotNull { lobe ->
-    val normalizedY = (y - lobe.centerY) / lobe.radiusY
-    if (abs(normalizedY) > 1f) return@mapNotNull null
-    val xFactor = sqrt((1f - (normalizedY * normalizedY)).coerceAtLeast(0f))
-    val halfWidth = lobe.radiusX * xFactor
-    (lobe.centerX - halfWidth) to (lobe.centerX + halfWidth)
-  }.sortedBy { it.first }
-  if (intervals.isEmpty()) {
-    return TowerSupportSpan(centerX = 0f, width = overallWidth * 0.38f)
-  }
-  val merged = mutableListOf<Pair<Float, Float>>()
-  for ((left, right) in intervals) {
-    val last = merged.lastOrNull()
-    if (last == null || left > last.second + 0.01f) {
-      merged += left to right
-    } else {
-      merged[merged.lastIndex] = last.first to max(last.second, right)
-    }
-  }
-  val widest = merged.maxByOrNull { it.second - it.first } ?: merged.first()
-  return TowerSupportSpan(
-    centerX = (widest.first + widest.second) * 0.5f,
-    width = (widest.second - widest.first).coerceIn(overallWidth * 0.24f, overallWidth),
-  )
-}
-
-private fun ellipseVertices(
-  centerX: Float,
-  centerY: Float,
-  radiusX: Float,
-  radiusY: Float,
-  segments: Int = 10,
-): List<TowerPoint> {
-  val vertices = buildList {
-    for (segment in 0 until segments) {
-      val angle = (segment / segments.toFloat()) * (PI * 2.0)
-      add(
-        TowerPoint(
-          x = centerX + (cos(angle).toFloat() * radiusX),
-          y = centerY + (sin(angle).toFloat() * radiusY),
-        )
-      )
-    }
-  }
-  return ensureCounterClockwise(vertices)
-}
-
 private fun ensureCounterClockwise(vertices: List<TowerPoint>): List<TowerPoint> {
   if (signedArea(vertices) >= 0f) {
     return vertices
@@ -410,6 +249,24 @@ private fun signedArea(vertices: List<TowerPoint>): Float {
   return area * 0.5f
 }
 
+private fun supportSpanFromOutline(
+  outline: List<TowerPoint>,
+  probeY: Float,
+  fallbackWidth: Float,
+): TowerSupportSpan {
+  val tolerance = fallbackWidth * 0.15f
+  val nearVertices = outline.filter { abs(it.y - probeY) <= tolerance }
+  if (nearVertices.size < 2) {
+    return TowerSupportSpan(centerX = 0f, width = fallbackWidth * 0.8f)
+  }
+  val minX = nearVertices.minOf { it.x }
+  val maxX = nearVertices.maxOf { it.x }
+  return TowerSupportSpan(
+    centerX = (minX + maxX) * 0.5f,
+    width = (maxX - minX).coerceAtLeast(fallbackWidth * 0.3f),
+  )
+}
+
 private fun stoneNoise(seed: Int, salt: Int): Float {
   val mixed = seed xor (salt * 0x45D9F3B)
   val hashed = (mixed * 0x27D4EB2D) xor (mixed ushr 15)
@@ -421,54 +278,52 @@ private fun centeredNoise(seed: Int, salt: Int): Float {
   return ((stoneNoise(seed, salt) * 2f) - 1f).coerceIn(-1f, 1f)
 }
 
-private fun lerp(from: Float, to: Float, progress: Float): Float {
-  return from + ((to - from) * progress.coerceIn(0f, 1f))
-}
-
 private val STONE_PROFILES = listOf(
-  StoneCompositeProfile(
-    kind = TowerBlockShapeKind.ROUNDED_SLAB,
-    preferredLobes = 3,
-    asymmetryBias = 0.00f,
-    ridgeLift = 0.10f,
-    endDrop = 0.25f,
-    flattening = 0.22f,
-  ),
-  StoneCompositeProfile(
-    kind = TowerBlockShapeKind.RIVER_STONE,
-    preferredLobes = 3,
-    asymmetryBias = 0.00f,
-    ridgeLift = 0.04f,
-    endDrop = 0.32f,
-    flattening = 0.08f,
-  ),
-  StoneCompositeProfile(
-    kind = TowerBlockShapeKind.PEBBLE_LEFT,
-    preferredLobes = 3,
-    asymmetryBias = -0.18f,
-    ridgeLift = 0.06f,
-    endDrop = 0.34f,
-    flattening = 0.10f,
-  ),
-  StoneCompositeProfile(
-    kind = TowerBlockShapeKind.PEBBLE_RIGHT,
-    preferredLobes = 3,
-    asymmetryBias = 0.18f,
-    ridgeLift = 0.06f,
-    endDrop = 0.34f,
-    flattening = 0.10f,
-  ),
-  StoneCompositeProfile(
-    kind = TowerBlockShapeKind.ROUNDED_BOULDER,
-    preferredLobes = 4,
+  RiverStoneProfile(
+    kind = TowerBlockShapeKind.RIVER_STONE_A,
+    exponent = 2.3f,
+    aspectStretch = 1.05f,
+    baseSquash = 0.20f,
     asymmetryBias = 0.05f,
-    ridgeLift = 0.14f,
-    endDrop = 0.38f,
-    flattening = 0.02f,
+  ),
+  RiverStoneProfile(
+    kind = TowerBlockShapeKind.RIVER_STONE_B,
+    exponent = 2.8f,
+    aspectStretch = 0.95f,
+    baseSquash = 0.40f,
+    asymmetryBias = -0.18f,
+  ),
+  RiverStoneProfile(
+    kind = TowerBlockShapeKind.RIVER_STONE_C,
+    exponent = 3.4f,
+    aspectStretch = 1.08f,
+    baseSquash = 0.55f,
+    asymmetryBias = 0.12f,
+  ),
+  RiverStoneProfile(
+    kind = TowerBlockShapeKind.RIVER_STONE_D,
+    exponent = 4.0f,
+    aspectStretch = 0.92f,
+    baseSquash = 0.30f,
+    asymmetryBias = -0.22f,
+  ),
+  RiverStoneProfile(
+    kind = TowerBlockShapeKind.RIVER_STONE_E,
+    exponent = 4.6f,
+    aspectStretch = 1.12f,
+    baseSquash = 0.65f,
+    asymmetryBias = 0.20f,
+  ),
+  RiverStoneProfile(
+    kind = TowerBlockShapeKind.RIVER_STONE_F,
+    exponent = 5.2f,
+    aspectStretch = 0.88f,
+    baseSquash = 0.45f,
+    asymmetryBias = -0.10f,
   ),
 )
 
 private const val BASE_FOUNDATION_WIDTH = 3.4f
 private const val BASE_BLOCK_WIDTH = 1.55f
 private const val FOUNDATION_HEIGHT = 0.62f
-private const val OUTLINE_SAMPLE_COUNT = 20
+private const val SUPERELLIPSE_VERTEX_COUNT = 32
