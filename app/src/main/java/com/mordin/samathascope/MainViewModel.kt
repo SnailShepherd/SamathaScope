@@ -1,21 +1,17 @@
 package com.mordin.samathascope
 
+import android.Manifest
 import android.app.Application
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.content.Context
+import android.content.pm.PackageManager
 import android.media.AudioManager
 import android.media.ToneGenerator
 import android.os.Build
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.mordin.samathascope.scene.godot.InkGardenTelemetry
-import com.mordin.samathascope.scene.SceneSignalInputs
-import com.mordin.samathascope.scene.SceneState
-import com.mordin.samathascope.scene.SceneStateProducer
-import com.mordin.samathascope.scene.buildSceneAudioState
-import com.mordin.samathascope.scene.buildSceneHudState
-import com.mordin.samathascope.scene.tower.SkyTowerSettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -24,24 +20,25 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.util.LinkedHashSet
-import java.util.Locale
-import java.util.concurrent.ConcurrentLinkedQueue
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sqrt
 
+/**
+ * Threading model: raw samples arrive on the Bluetooth reader thread (or the debug-replay coroutine),
+ * the session/monitor loops run on [Dispatchers.Default], and user actions arrive on Main. All mutable
+ * signal-processing state (processor, calibration, scorer, smoothers, recorder, audio engine, counters)
+ * is only touched while holding [lock], so those three threads never interleave inside it.
+ */
 class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   private val ctx = app.applicationContext
+  private val lock = Any()
   private val rawSampleRateHz = DEBUG_RAW_LOOP_SAMPLE_RATE_HZ
   private val plotSettingsStore = createPlotSettingsStore(ctx)
-  private val skyTowerSettingsStore = createSkyTowerSettingsStore(ctx)
   private val noiseColorStore = createNoiseColorStore(ctx)
-  private val inkGardenRefreshModeStore = createInkGardenRefreshModeStore(ctx)
-  private val inkGardenSceneSettingsStore = createInkGardenSceneSettingsStore(ctx)
+  private val deviceSelectionStore = createDeviceSelectionStore(ctx)
   private val debugRawLoopStore = createDebugRawLoopStore(ctx)
-  private val initialSkyTowerSettings = sanitizeSkyTowerSettings(skyTowerSettingsStore.load())
-  private val initialInkGardenSceneSettings = sanitizeInkGardenSceneSettings(inkGardenSceneSettingsStore.load())
   private var debugRawLoopRecord: DebugRawLoopRecord? =
     debugRawLoopStore.load(rawSampleRateHz * DEBUG_RAW_LOOP_DURATION_SECONDS)
   private val debugRawLoopCaptureBuffer = IntArray(rawSampleRateHz * DEBUG_RAW_LOOP_DURATION_SECONDS)
@@ -56,12 +53,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   private val _ui = MutableStateFlow(
     UiState(
       plotSettings = plotSettingsStore.load(),
-      skyTowerSettings = initialSkyTowerSettings,
       noiseColor = noiseColorStore.load(),
-      inkGarden = InkGardenUiState(
-        refreshMode = inkGardenRefreshModeStore.load(),
-        sceneSettings = initialInkGardenSceneSettings,
-      ),
+      selectedDeviceMac = deviceSelectionStore.load(),
       debugRawLoopAvailable = debugRawLoopRecord != null,
     )
   )
@@ -111,15 +104,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   private var pausedAtMs: Long = 0L
   private var pausedAccumMs: Long = 0L
   private var sessionJob: Job? = null
-  private var gameLoopJob: Job? = null
   private var streamMonitorJob: Job? = null
+  private var rawPreviewJob: Job? = null
 
   private var audio: NoiseAudioEngine? = null
-  private var gameAudio: GameSoundEngine? = null
   private var recorder: SessionRecorder? = null
-  private val gameSignalMapper = GameSignalMapper()
-  private val sceneStateProducer = SceneStateProducer()
-  private val pendingGameEvents = ConcurrentLinkedQueue<GameEvent>()
   private var debugRawReplayJob: Job? = null
 
   private var rawCountThisSecond = 0
@@ -127,10 +116,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   private var lastMeasuredSamplesPerSecond = 0f
   private var lastRawSampleAtMs: Long = 0L
   private var firstRawBurstAtMs: Long = 0L
-  private var rawPreviewDecim = 0
-  private var inkGardenRefreshTracker = InkGardenRefreshTracker()
+  private var rawPreviewDirty = false
 
-  private var lastGameUpdateMs = 0L
   private var lastAdaptiveCalibrationUpdateMs = 0L
   private var calibrationRawCount = 0
   private var calibrationRawMean = 0.0
@@ -144,14 +131,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   init {
     eegProcessor.setNotchEnabled(_ui.value.notch50Enabled)
     scorer.setArtefactCalibrationProfile(artefactCalibrationProfile)
-    if (Build.VERSION.SDK_INT < 31) {
+    if (hasBluetoothConnectPermission()) {
       _ui.update { it.copy(btPermissionGranted = true) }
       refreshBondedDevices()
     }
     refreshRawPreview()
     refreshMetricPlotSeries()
-    refreshSelectedGameUi()
     startStreamMonitor()
+    startRawPreviewTicker()
+  }
+
+  private fun hasBluetoothConnectPermission(): Boolean {
+    if (Build.VERSION.SDK_INT < 31) return true
+    return ctx.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
   }
 
   fun onPermissionsResult(result: Map<String, Boolean>) {
@@ -164,130 +156,55 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val adapter = btAdapter ?: return
     if (!_ui.value.btPermissionGranted && Build.VERSION.SDK_INT >= 31) return
 
-    val bonded = adapter.bondedDevices?.map {
-      BondedDevice(mac = it.address, display = "${it.name ?: "Unknown"} (${it.address})")
-    } ?: emptyList()
+    val bonded = try {
+      adapter.bondedDevices?.map {
+        BondedDevice(mac = it.address, display = "${it.name ?: "Unknown"} (${it.address})")
+      } ?: emptyList()
+    } catch (e: SecurityException) {
+      Log.w(TAG, "Bluetooth permission missing while listing bonded devices", e)
+      emptyList()
+    }
 
+    val remembered = deviceSelectionStore.load()
     _ui.update { state ->
       state.copy(
         bondedDevices = bonded,
-        selectedDeviceMac = state.selectedDeviceMac ?: bonded.firstOrNull()?.mac,
+        selectedDeviceMac = resolveSelectedDeviceMac(
+          current = state.selectedDeviceMac,
+          remembered = remembered,
+          bonded = bonded.map { it.mac },
+        ),
       )
     }
   }
 
   fun selectDevice(mac: String) {
     _ui.update { it.copy(selectedDeviceMac = mac) }
+    deviceSelectionStore.save(mac)
   }
 
   fun selectTab(tab: AppTab) {
     _ui.update { it.copy(selectedTab = tab) }
-    refreshSelectedGameUi()
-    syncFeedbackAudioState()
-  }
-
-  fun selectGame(gameId: GameId) {
-    pendingGameEvents.clear()
-    inkGardenRefreshTracker = InkGardenRefreshTracker()
-    sceneStateProducer.restartScene(System.currentTimeMillis())
-    sceneStateProducer.setPlayback(active = false, frozen = true)
-    val sceneState = currentSceneState()
-    _ui.update {
-      it.copy(
-        selectedGameId = gameId,
-        gameRunning = false,
-        gamePaused = false,
-        sceneState = sceneState,
-        gameAudioState = buildSceneAudioState(gameId, sceneState, muted = true),
-        sceneHudState = buildSceneHudState(
-          gameId = gameId,
-          sceneState = sceneState,
-          stateLabel = it.displayedStateLabel,
-          poorSignal = it.poorSignal,
-          elapsedSeconds = it.sessionElapsedSec,
-          batteryPercent = it.batteryPercent,
-          inputEnabled = false,
-          inputHint = gameInputHint(gameId, gameRunning = false),
-        ),
-      )
-    }
-    refreshSelectedGameUi()
-    syncFeedbackAudioState()
-  }
-
-  fun startGame() {
-    if (!canStartGame() || _ui.value.gameRunning) return
-    pendingGameEvents.clear()
-    lastGameUpdateMs = 0L
-    val now = System.currentTimeMillis()
-    sceneStateProducer.restartScene(now)
-    if (_ui.value.selectedGameId == GameId.INK_GARDEN) {
-      requestNewInkGardenPictureInternal(nowMs = now, preservePaused = false)
-    }
-    val sceneState = currentSceneState()
-    _ui.update {
-      it.copy(
-        gameRunning = true,
-        gamePaused = false,
-        gameRunId = it.gameRunId + 1,
-        sceneState = sceneState,
-        gameAudioState = buildSceneAudioState(
-          gameId = it.selectedGameId,
-          sceneState = sceneState,
-          muted = !shouldGameAudioBeAudible(),
-        ),
-      )
-    }
-    refreshSelectedGameUi()
-    gameAudio?.update(_ui.value.selectedGameId, _ui.value.gameAudioState)
-    syncFeedbackAudioState()
-  }
-
-  fun toggleGamePause() {
-    if (!_ui.value.gameRunning) return
-    val nextPaused = !_ui.value.gamePaused
-    _ui.update { it.copy(gamePaused = nextPaused) }
-    refreshSelectedGameUi()
-    syncFeedbackAudioState(fadeIn = !nextPaused)
-  }
-
-  fun stopGame() {
-    if (!_ui.value.gameRunning && !_ui.value.gamePaused) return
-    pendingGameEvents.clear()
-    lastGameUpdateMs = 0L
-    inkGardenRefreshTracker = InkGardenRefreshTracker()
-    sceneStateProducer.restartScene(System.currentTimeMillis())
-    sceneStateProducer.setPlayback(active = false, frozen = true)
-    val sceneState = currentSceneState()
-    _ui.update {
-      it.copy(
-        gameRunning = false,
-        gamePaused = false,
-        gameRunId = it.gameRunId + 1,
-        inkGarden = it.inkGarden.copy(growthActive = false),
-        sceneState = sceneState,
-        gameAudioState = buildSceneAudioState(it.selectedGameId, sceneState, muted = true),
-      )
-    }
-    refreshSelectedGameUi()
-    syncFeedbackAudioState()
-  }
-
-  fun onGameTap() {
-    // Scene-local hosts own input now.
   }
 
   fun connect() {
     if (_ui.value.connected || _ui.value.headsetConnecting || _ui.value.debugRawLoopEnabled) return
     val mac = _ui.value.selectedDeviceMac ?: return
     val adapter = btAdapter ?: return
-    val device = adapter.getRemoteDevice(mac)
+    val device = try {
+      adapter.getRemoteDevice(mac)
+    } catch (e: IllegalArgumentException) {
+      Log.w(TAG, "Invalid Bluetooth address $mac", e)
+      return
+    }
+    deviceSelectionStore.save(mac)
 
-    client?.close()
-    client = null
-    resetStreamTracking()
-
-    client = BluetoothMindWaveClient(device)
+    val newClient = BluetoothMindWaveClient(device)
+    synchronized(lock) {
+      client?.close()
+      client = newClient
+      resetStreamTracking()
+    }
     _ui.update {
       it.copy(
         headsetConnecting = true,
@@ -300,40 +217,54 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       )
     }
 
-    client?.connect(
+    // Callbacks from a client we have since replaced or closed are ignored, so a late disconnect from
+    // an old socket can never reset the state of a newer connection attempt.
+    newClient.connect(
       onConnected = {
-        _ui.update {
-          it.copy(
-            headsetConnecting = false,
-            connected = true,
-            eegStreamStatus = EegStreamStatus.WAITING_FOR_RAW,
-            eegStreamReady = false,
-          )
+        synchronized(lock) {
+          if (client !== newClient) return@synchronized
+          _ui.update {
+            it.copy(
+              headsetConnecting = false,
+              connected = true,
+              eegStreamStatus = EegStreamStatus.WAITING_FOR_RAW,
+              eegStreamReady = false,
+            )
+          }
         }
       },
-      onDisconnected = { _ ->
-        cancelDebugRawLoopCapture()
-        resetStreamTracking()
-        _ui.update {
-          it.copy(
-            headsetConnecting = false,
-            connected = false,
-            eegStreamStatus = EegStreamStatus.DISCONNECTED,
-            eegStreamReady = false,
-            streamStallMs = 0,
-            samplesPerSecond = 0f,
-            batteryPercent = null,
-          )
+      onDisconnected = { error ->
+        synchronized(lock) {
+          if (client !== newClient) return@synchronized
+          if (error != null) Log.w(TAG, "Headset connection ended", error)
+          client = null
+          cancelDebugRawLoopCaptureLocked()
+          resetStreamTracking()
+          stopSessionLocked()
+          _ui.update {
+            it.copy(
+              headsetConnecting = false,
+              connected = false,
+              eegStreamStatus = EegStreamStatus.DISCONNECTED,
+              eegStreamReady = false,
+              streamStallMs = 0,
+              samplesPerSecond = 0f,
+              batteryPercent = null,
+            )
+          }
         }
-        stopSession()
       },
-      onData = { data -> handleThinkGearData(data) }
+      onData = { data ->
+        synchronized(lock) {
+          if (client === newClient) handleThinkGearData(data)
+        }
+      },
     )
   }
 
-  fun disconnect() {
-    cancelDebugRawLoopCapture()
-    stopSession()
+  fun disconnect() = synchronized(lock) {
+    cancelDebugRawLoopCaptureLocked()
+    stopSessionLocked()
     client?.close()
     client = null
     resetStreamTracking()
@@ -351,157 +282,138 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   }
 
   fun startSession() {
-    if (_ui.value.sessionRunning || !_ui.value.eegStreamReady) return
+    synchronized(lock) {
+      if (_ui.value.sessionRunning || !_ui.value.eegStreamReady) return
 
-    eegProcessor.reset()
-    eegProcessor.setNotchEnabled(_ui.value.notch50Enabled)
-    calibration.reset()
-    scorer.reset()
-    artefactCalibrationProfile = ArtefactCalibrationProfile()
-    scorer.setArtefactCalibrationProfile(artefactCalibrationProfile)
-    metricHistory.reset()
-    resetRawCalibrationStats()
-    resetSmoothers()
-    gameSignalMapper.reset()
-    pendingGameEvents.clear()
-    calibration.resetArtefactCapture()
+      eegProcessor.reset()
+      eegProcessor.setNotchEnabled(_ui.value.notch50Enabled)
+      calibration.reset()
+      scorer.reset()
+      artefactCalibrationProfile = ArtefactCalibrationProfile()
+      scorer.setArtefactCalibrationProfile(artefactCalibrationProfile)
+      metricHistory.reset()
+      resetRawCalibrationStats()
+      resetSmoothers()
+      calibration.resetArtefactCapture()
 
-    statsSumMeditationProxy = 0f
-    statsCount = 0
-    timeMeditationProxyOver80Ms = 0L
-    lastFeatureTsMs = 0L
-    lastGameUpdateMs = 0L
-    lastAdaptiveCalibrationUpdateMs = 0L
-    eyesClosedCuePlayed = false
-    artefactPromptIndex = 0
-    artefactPromptStartMs = 0L
-    sceneStateProducer.reset()
-    val initialSceneState = currentSceneState()
+      statsSumMeditationProxy = 0f
+      statsCount = 0
+      timeMeditationProxyOver80Ms = 0L
+      lastFeatureTsMs = 0L
+      lastAdaptiveCalibrationUpdateMs = 0L
+      eyesClosedCuePlayed = false
+      artefactPromptIndex = 0
+      artefactPromptStartMs = 0L
 
-    sessionStartMs = System.currentTimeMillis()
-    pausedAtMs = 0L
-    pausedAccumMs = 0L
+      sessionStartMs = System.currentTimeMillis()
+      pausedAtMs = 0L
+      pausedAccumMs = 0L
 
-    if (!_ui.value.plotSettings.getValue(PlotType.RAW).isUserLocked) {
-      val (yMin, yMax) = PlotMath.defaultRawRange()
-      updatePlotSettings(
-        type = PlotType.RAW,
-        newSettings = _ui.value.plotSettings.getValue(PlotType.RAW).copy(
-          yMin = yMin,
-          yMax = yMax,
-          isUserLocked = false,
-        ),
-        persist = true,
-      )
-    }
+      if (!_ui.value.plotSettings.getValue(PlotType.RAW).isUserLocked) {
+        val (yMin, yMax) = PlotMath.defaultRawRange()
+        updatePlotSettings(
+          type = PlotType.RAW,
+          newSettings = _ui.value.plotSettings.getValue(PlotType.RAW).copy(
+            yMin = yMin,
+            yMax = yMax,
+            isUserLocked = false,
+          ),
+          persist = true,
+        )
+      }
 
-    if (_ui.value.recordingEnabled) {
-      recorder = SessionRecorder(ctx).apply { start(sampleRateHz = rawSampleRateHz) }
+      recorder = if (_ui.value.recordingEnabled) startRecorderOrNull() else null
       _ui.update { it.copy(lastRecordingPath = recorder?.sessionDir?.absolutePath) }
-    } else {
-      recorder = null
-      _ui.update { it.copy(lastRecordingPath = null) }
+
+      _ui.update {
+        it.copy(
+          sessionRunning = true,
+          sessionPaused = false,
+          calibrating = true,
+          calibrationPhase = CalibrationPhase.EYES_OPEN,
+          calibrationInstruction = calibrationInstructionFor(CalibrationPhase.EYES_OPEN, calibration.calibrationSeconds),
+          calibrationRemainingSec = calibration.calibrationSeconds,
+          artefactCalibrationState = ArtefactCalibrationUiState(),
+          baselineProvisional = false,
+          sessionElapsedSec = 0,
+          meditationProxy = 0f,
+          settledness = 0f,
+          control = 0f,
+          alertness = 0f,
+          drowsyScore = 0f,
+          artefactScore = 0f,
+          qualityConfidence = 0f,
+          effortfulFocusScore = 0f,
+          mindWanderingScore = 0f,
+          displayedStateLabel = StateLabel.UNCERTAIN,
+          drowsyTarContribution = 0f,
+          drowsyTbrContribution = 0f,
+          drowsyEntropyContribution = 0f,
+          drowsyAbrContribution = 0f,
+          avgMeditationProxy = 0f,
+          timeMeditationProxyOver80Seconds = 0,
+          audioRunning = audio != null && it.audioEnabled,
+          audioMuted = true,
+          metricPlotSeries = emptyMap(),
+          rawPlotOffsetSeconds = 0,
+          metricPlotOffsetSeconds = 0,
+        )
+      }
+
+      refreshRawPreview()
+      refreshMetricPlotSeries()
+      ensureSessionAudioEngine(fadeIn = false)
+      syncFeedbackAudioState(fadeIn = false)
     }
 
-    _ui.update {
-      it.copy(
-        sessionRunning = true,
-        sessionPaused = false,
-        calibrating = true,
-        calibrationPhase = CalibrationPhase.EYES_OPEN,
-        calibrationInstruction = calibrationInstructionFor(CalibrationPhase.EYES_OPEN, calibration.calibrationSeconds),
-        calibrationRemainingSec = calibration.calibrationSeconds,
-        artefactCalibrationState = ArtefactCalibrationUiState(),
-        sessionElapsedSec = 0,
-        meditationProxy = 0f,
-        settledness = 0f,
-        control = 0f,
-        alertness = 0f,
-        drowsyScore = 0f,
-        artefactScore = 0f,
-        qualityConfidence = 0f,
-        effortfulFocusScore = 0f,
-        mindWanderingScore = 0f,
-        displayedStateLabel = StateLabel.UNCERTAIN,
-        drowsyTarContribution = 0f,
-        drowsyTbrContribution = 0f,
-        drowsyEntropyContribution = 0f,
-        drowsyAbrContribution = 0f,
-        avgMeditationProxy = 0f,
-        timeMeditationProxyOver80Seconds = 0,
-        audioRunning = audio != null && it.audioEnabled,
-        audioMuted = true,
-        metricPlotSeries = emptyMap(),
-        rawPlotOffsetSeconds = 0,
-        metricPlotOffsetSeconds = 0,
-        gameRunning = false,
-        gamePaused = false,
-        sceneState = initialSceneState,
-        gameAudioState = buildSceneAudioState(it.selectedGameId, initialSceneState, muted = true),
-        sceneHudState = buildSceneHudState(
-          gameId = it.selectedGameId,
-          sceneState = initialSceneState,
-          stateLabel = StateLabel.UNCERTAIN,
-          poorSignal = it.poorSignal,
-          elapsedSeconds = 0,
-          batteryPercent = it.batteryPercent,
-          inputEnabled = false,
-          inputHint = gameInputHint(it.selectedGameId, gameRunning = false),
-        ),
-      )
-    }
-
-    refreshRawPreview()
-    refreshMetricPlotSeries()
-    refreshSelectedGameUi()
-    ensureSessionAudioEngines(fadeIn = false)
-    syncFeedbackAudioState(fadeIn = false)
-
+    sessionJob?.cancel()
     sessionJob = viewModelScope.launch(Dispatchers.Default) {
       while (_ui.value.sessionRunning) {
-        val now = System.currentTimeMillis()
-        val elapsedMs = now - sessionStartMs - pausedAccumMs - if (_ui.value.sessionPaused) (now - pausedAtMs) else 0L
-        val elapsedSec = (elapsedMs / 1000L).toInt().coerceAtLeast(0)
-
-        if (_ui.value.calibrating) {
-          val rem = calibration.remainingSeconds()
-          val phase = if (rem > 30) CalibrationPhase.EYES_OPEN else CalibrationPhase.EYES_CLOSED
-          if (phase == CalibrationPhase.EYES_CLOSED && !eyesClosedCuePlayed) {
-            eyesClosedCuePlayed = true
-            if (_ui.value.audioEnabled) {
-              BellSoundPlayer.playCalibrationComplete()
-            }
-          }
-          _ui.update {
-            it.copy(
-              calibrationRemainingSec = rem,
-              calibrationPhase = phase,
-              calibrationInstruction = calibrationInstructionFor(phase, rem),
-              sessionElapsedSec = elapsedSec,
-            )
-          }
-          if (calibration.isDone()) {
-            finishCleanCalibration(now)
-          }
-        } else if (_ui.value.artefactCalibrationState.running) {
-          updateArtefactCaptureUi(now, elapsedSec)
-        } else {
-          _ui.update { it.copy(sessionElapsedSec = elapsedSec) }
-        }
-
+        synchronized(lock) { tickSession(System.currentTimeMillis()) }
         delay(200)
       }
     }
-    startGameLoop()
   }
 
-  fun stopSession() {
+  private fun tickSession(now: Long) {
+    if (!_ui.value.sessionRunning) return
+    val elapsedMs = now - sessionStartMs - pausedAccumMs - if (_ui.value.sessionPaused) (now - pausedAtMs) else 0L
+    val elapsedSec = (elapsedMs / 1000L).toInt().coerceAtLeast(0)
+
+    if (_ui.value.calibrating) {
+      val rem = calibration.remainingSeconds()
+      val phase = if (rem > 30) CalibrationPhase.EYES_OPEN else CalibrationPhase.EYES_CLOSED
+      if (phase == CalibrationPhase.EYES_CLOSED && !eyesClosedCuePlayed) {
+        eyesClosedCuePlayed = true
+        if (_ui.value.audioEnabled) {
+          BellSoundPlayer.playCalibrationComplete()
+        }
+      }
+      _ui.update {
+        it.copy(
+          calibrationRemainingSec = rem,
+          calibrationPhase = phase,
+          calibrationInstruction = calibrationInstructionFor(phase, rem),
+          sessionElapsedSec = elapsedSec,
+        )
+      }
+      if (calibration.isDone()) {
+        finishCleanCalibration(now)
+      }
+    } else if (_ui.value.artefactCalibrationState.running) {
+      updateArtefactCaptureUi(now, elapsedSec)
+    } else {
+      _ui.update { it.copy(sessionElapsedSec = elapsedSec) }
+    }
+  }
+
+  fun stopSession() = synchronized(lock) { stopSessionLocked() }
+
+  private fun stopSessionLocked() {
     sessionJob?.cancel()
     sessionJob = null
-    gameLoopJob?.cancel()
-    gameLoopJob = null
 
-    shutdownAudioEngines()
+    shutdownAudioEngine()
 
     recorder?.stop()
     recorder = null
@@ -509,10 +421,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     eyesClosedCuePlayed = false
     artefactPromptIndex = 0
     artefactPromptStartMs = 0L
-    pendingGameEvents.clear()
-    gameSignalMapper.reset()
-    sceneStateProducer.reset()
-    val resetSceneState = currentSceneState()
 
     _ui.update {
       it.copy(
@@ -523,30 +431,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         calibrationInstruction = "",
         calibrationRemainingSec = 0,
         artefactCalibrationState = ArtefactCalibrationUiState(),
+        baselineProvisional = false,
         sessionElapsedSec = 0,
         audioRunning = false,
         audioMuted = true,
-        gameRunning = false,
-        gamePaused = false,
-        sceneState = resetSceneState,
-        gameAudioState = buildSceneAudioState(it.selectedGameId, resetSceneState, muted = true),
-        sceneHudState = buildSceneHudState(
-          gameId = it.selectedGameId,
-          sceneState = resetSceneState,
-          stateLabel = StateLabel.UNCERTAIN,
-          poorSignal = it.poorSignal,
-          elapsedSeconds = 0,
-          batteryPercent = it.batteryPercent,
-          inputEnabled = false,
-          inputHint = gameInputHint(it.selectedGameId, gameRunning = false),
-        ),
       )
     }
-    refreshSelectedGameUi()
   }
 
-  fun togglePause() {
-    if (!_ui.value.sessionRunning) return
+  fun togglePause() = synchronized(lock) {
+    if (!_ui.value.sessionRunning) return@synchronized
     val now = System.currentTimeMillis()
     if (!_ui.value.sessionPaused) {
       pausedAtMs = now
@@ -560,11 +454,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       refreshMetricPlotSeries()
       syncFeedbackAudioState(fadeIn = true)
     }
-    refreshSelectedGameUi()
   }
 
-  fun toggleVisibleMetric(type: PlotType) {
-    if (type == PlotType.RAW) return
+  fun toggleVisibleMetric(type: PlotType) = synchronized(lock) {
+    if (type == PlotType.RAW) return@synchronized
     val next = LinkedHashSet(_ui.value.visibleMetrics)
     if (next.contains(type)) {
       if (next.size > 1) next.remove(type)
@@ -579,8 +472,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     _ui.update { it.copy(selectedMetricInfo = type) }
   }
 
-  fun setFeedbackMetric(value: PlotType) {
-    if (!rewardSelectableMetrics().contains(value)) return
+  fun setFeedbackMetric(value: PlotType) = synchronized(lock) {
+    if (!rewardSelectableMetrics().contains(value)) return@synchronized
     _ui.update {
       it.copy(
         feedbackMetric = value,
@@ -590,13 +483,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     refreshMetricPlotSeries()
   }
 
-  fun setAudioEnabled(value: Boolean) {
+  fun setAudioEnabled(value: Boolean) = synchronized(lock) {
     _ui.update { it.copy(audioEnabled = value) }
     if (!value) {
-      shutdownAudioEngines()
+      shutdownAudioEngine()
       _ui.update { it.copy(audioRunning = false, audioMuted = true) }
     } else {
-      ensureSessionAudioEngines(fadeIn = true)
+      ensureSessionAudioEngine(fadeIn = true)
       syncFeedbackAudioState(fadeIn = true)
     }
   }
@@ -608,95 +501,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     noiseColorStore.save(value)
   }
 
-  fun setInkGardenRefreshMode(value: InkGardenRefreshMode) {
-    _ui.update {
-      it.copy(
-        inkGarden = it.inkGarden.copy(refreshMode = value),
-      )
-    }
-    inkGardenRefreshModeStore.save(value)
-  }
-
-  fun setInkGardenEnhancedFxEnabled(value: Boolean) {
-    updateInkGardenSceneSettings { it.copy(enhancedFxEnabled = value) }
-  }
-
-  fun setInkGardenGhostTrailsEnabled(value: Boolean) {
-    updateInkGardenSceneSettings { it.copy(ghostTrailsEnabled = value) }
-  }
-
-  fun setInkGardenGoldDustEnabled(value: Boolean) {
-    updateInkGardenSceneSettings { it.copy(goldDustEnabled = value) }
-  }
-
-  fun setInkGardenEffectTriggerThreshold(value: Float) {
-    updateInkGardenSceneSettings { it.copy(effectTriggerThreshold = value) }
-  }
-
-  fun setInkGardenEffectStrength(value: Float) {
-    updateInkGardenSceneSettings { it.copy(effectStrength = value) }
-  }
-
-  fun requestNewInkGardenPicture() {
-    if (_ui.value.selectedGameId != GameId.INK_GARDEN) return
-    if (!_ui.value.sessionRunning || !_ui.value.gameRunning) return
-    requestNewInkGardenPictureInternal(
-      nowMs = System.currentTimeMillis(),
-      preservePaused = _ui.value.gamePaused,
-    )
-  }
-
-  fun onInkGardenTelemetryChanged(telemetry: InkGardenTelemetry) {
-    if (_ui.value.selectedGameId != GameId.INK_GARDEN) return
-    if (telemetry.version != _ui.value.inkGarden.pictureVersion) return
-
-    val now = System.currentTimeMillis()
-    inkGardenRefreshTracker = updateInkGardenRefreshTracker(
-      tracker = inkGardenRefreshTracker,
-      richness = telemetry.richness,
-      nowMs = now,
-    )
-    _ui.update {
-      it.copy(
-        inkGarden = it.inkGarden.copy(
-          richness = telemetry.richness.coerceIn(0f, 1f),
-          growthActive = telemetry.growthActive,
-          motifName = telemetry.motifName,
-          brushPresetName = telemetry.brushPresetName,
-        ),
-      )
-    }
-    if (
-      shouldAutoRefreshInkGarden(
-        mode = _ui.value.inkGarden.refreshMode,
-        eligible = isInkGardenAutoRefreshEligible(),
-        richness = telemetry.richness,
-        tracker = inkGardenRefreshTracker,
-        nowMs = now,
-      )
-    ) {
-      requestNewInkGardenPictureInternal(nowMs = now, preservePaused = false)
-    }
-  }
-
   fun setGamma(value: Float) = _ui.update { it.copy(gamma = value) }
 
-  fun setGMinDb(value: Int) = _ui.update { it.copy(gMinDb = min(value, _ui.value.gMaxDb - 1)) }
+  fun setGMinDb(value: Int) = _ui.update { it.copy(gMinDb = min(value, it.gMaxDb - 1)) }
 
-  fun setGMaxDb(value: Int) = _ui.update { it.copy(gMaxDb = max(value, _ui.value.gMinDb + 1)) }
+  fun setGMaxDb(value: Int) = _ui.update { it.copy(gMaxDb = max(value, it.gMinDb + 1)) }
 
   fun setRecordingEnabled(value: Boolean) = _ui.update { it.copy(recordingEnabled = value) }
 
-  fun startDebugRawLoopCapture() {
-    if (_ui.value.debugRawLoopEnabled || _ui.value.debugRawLoopCapturing) return
-    if (!_ui.value.connected || !_ui.value.eegStreamReady) return
-    debugRawLoopCaptureCount = 0
-    debugRawLoopCapturePoorSignalSum = 0L
-    debugRawLoopCapturePoorSignalCount = 0
-    debugRawLoopCaptureAttentionSum = 0L
-    debugRawLoopCaptureAttentionCount = 0
-    debugRawLoopCaptureMeditationSum = 0L
-    debugRawLoopCaptureMeditationCount = 0
+  fun startDebugRawLoopCapture() = synchronized(lock) {
+    if (_ui.value.debugRawLoopEnabled || _ui.value.debugRawLoopCapturing) return@synchronized
+    if (!_ui.value.connected || !_ui.value.eegStreamReady) return@synchronized
+    resetDebugRawLoopCaptureCounters()
     _ui.update {
       it.copy(
         debugRawLoopCapturing = true,
@@ -705,15 +521,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
   }
 
-  fun cancelDebugRawLoopCapture() {
+  fun cancelDebugRawLoopCapture() = synchronized(lock) { cancelDebugRawLoopCaptureLocked() }
+
+  private fun cancelDebugRawLoopCaptureLocked() {
     if (!_ui.value.debugRawLoopCapturing) return
-    debugRawLoopCaptureCount = 0
-    debugRawLoopCapturePoorSignalSum = 0L
-    debugRawLoopCapturePoorSignalCount = 0
-    debugRawLoopCaptureAttentionSum = 0L
-    debugRawLoopCaptureAttentionCount = 0
-    debugRawLoopCaptureMeditationSum = 0L
-    debugRawLoopCaptureMeditationCount = 0
+    resetDebugRawLoopCaptureCounters()
     _ui.update {
       it.copy(
         debugRawLoopCapturing = false,
@@ -722,12 +534,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
   }
 
-  fun setDebugRawLoopEnabled(value: Boolean) {
-    if (_ui.value.sessionRunning || value == _ui.value.debugRawLoopEnabled) return
+  private fun resetDebugRawLoopCaptureCounters() {
+    debugRawLoopCaptureCount = 0
+    debugRawLoopCapturePoorSignalSum = 0L
+    debugRawLoopCapturePoorSignalCount = 0
+    debugRawLoopCaptureAttentionSum = 0L
+    debugRawLoopCaptureAttentionCount = 0
+    debugRawLoopCaptureMeditationSum = 0L
+    debugRawLoopCaptureMeditationCount = 0
+  }
+
+  fun setDebugRawLoopEnabled(value: Boolean) = synchronized(lock) {
+    if (_ui.value.sessionRunning || value == _ui.value.debugRawLoopEnabled) return@synchronized
 
     if (value) {
-      val loopRecord = debugRawLoopRecord ?: return
-      cancelDebugRawLoopCapture()
+      val loopRecord = debugRawLoopRecord ?: return@synchronized
+      cancelDebugRawLoopCaptureLocked()
       if (_ui.value.connected || _ui.value.headsetConnecting) {
         disconnect()
       }
@@ -751,8 +573,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         )
       }
       startDebugRawReplay(loopRecord.samples)
-      refreshSelectedGameUi()
-      return
+      return@synchronized
     }
 
     stopDebugRawReplay()
@@ -773,57 +594,40 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
     refreshRawPreview()
     refreshMetricPlotSeries()
-    refreshSelectedGameUi()
   }
 
-  fun setSkyTowerBaseWidthScale(value: Float) {
-    updateSkyTowerSettings { it.copy(baseWidthScale = value) }
-  }
-
-  fun setSkyTowerCarrierSpeedMultiplier(value: Float) {
-    updateSkyTowerSettings { it.copy(carrierSpeedMultiplier = value) }
-  }
-
-  fun setSkyTowerIrregularity(value: Float) {
-    updateSkyTowerSettings { it.copy(irregularity = value) }
-  }
-
-  fun setSkyTowerCollapseEnabled(value: Boolean) {
-    updateSkyTowerSettings { it.copy(collapseEnabled = value) }
-  }
-
-  fun panRawPlotBy(deltaSeconds: Int) {
-    if (!canPanPlots()) return
+  fun panRawPlotBy(deltaSeconds: Int) = synchronized(lock) {
+    if (!canPanPlots()) return@synchronized
     val current = _ui.value.rawPlotOffsetSeconds
     val maxOffset = eegProcessor.maxRawHistoryOffsetSeconds(_ui.value.plotSettings.getValue(PlotType.RAW).windowSeconds)
     _ui.update { it.copy(rawPlotOffsetSeconds = (current + deltaSeconds).coerceIn(0, maxOffset)) }
     refreshRawPreview()
   }
 
-  fun panMetricPlotBy(deltaSeconds: Int) {
-    if (!canPanPlots()) return
+  fun panMetricPlotBy(deltaSeconds: Int) = synchronized(lock) {
+    if (!canPanPlots()) return@synchronized
     val windowSeconds = _ui.value.plotSettings.getValue(PlotType.MEDITATION_PROXY).windowSeconds
     val maxOffset = _ui.value.visibleMetrics.maxOfOrNull { metricHistory.maxOffsetSeconds(it, windowSeconds) } ?: 0
-    _ui.update { it.copy(metricPlotOffsetSeconds = (_ui.value.metricPlotOffsetSeconds + deltaSeconds).coerceIn(0, maxOffset)) }
+    _ui.update { it.copy(metricPlotOffsetSeconds = (it.metricPlotOffsetSeconds + deltaSeconds).coerceIn(0, maxOffset)) }
     refreshMetricPlotSeries()
   }
 
-  fun resetRawPlotToLatest() {
+  fun resetRawPlotToLatest() = synchronized(lock) {
     _ui.update { it.copy(rawPlotOffsetSeconds = 0) }
     refreshRawPreview()
   }
 
-  fun resetMetricPlotToLatest() {
+  fun resetMetricPlotToLatest() = synchronized(lock) {
     _ui.update { it.copy(metricPlotOffsetSeconds = 0) }
     refreshMetricPlotSeries()
   }
 
-  fun setNotch50Enabled(value: Boolean) {
+  fun setNotch50Enabled(value: Boolean) = synchronized(lock) {
     eegProcessor.setNotchEnabled(value)
     _ui.update { it.copy(notch50Enabled = value) }
   }
 
-  fun setMetricWindowSeconds(seconds: Int) {
+  fun setMetricWindowSeconds(seconds: Int) = synchronized(lock) {
     val normalized = METRIC_WINDOW_OPTIONS.minBy { option -> kotlin.math.abs(option - seconds) }
     val updated = _ui.value.plotSettings.mapValues { (type, settings) ->
       if (type == PlotType.RAW) settings else settings.copy(windowSeconds = normalized)
@@ -835,8 +639,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     refreshMetricPlotSeries()
   }
 
-  fun startArtefactCalibration() {
-    if (!_ui.value.sessionRunning || _ui.value.calibrating) return
+  fun startArtefactCalibration() = synchronized(lock) {
+    if (!_ui.value.sessionRunning || _ui.value.calibrating) return@synchronized
     calibration.resetArtefactCapture()
     artefactPromptIndex = 0
     artefactPromptStartMs = System.currentTimeMillis()
@@ -869,7 +673,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
   }
 
-  fun skipArtefactCalibration() {
+  fun skipArtefactCalibration() = synchronized(lock) {
     _ui.update {
       it.copy(
         artefactCalibrationState = it.artefactCalibrationState.copy(
@@ -886,8 +690,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     syncFeedbackAudioState(fadeIn = true)
   }
 
-  fun skipCalibration() {
-    if (!_ui.value.sessionRunning || !_ui.value.calibrating) return
+  fun skipCalibration() = synchronized(lock) {
+    if (!_ui.value.sessionRunning || !_ui.value.calibrating) return@synchronized
     finishCleanCalibration(now = System.currentTimeMillis(), skipped = true)
   }
 
@@ -903,6 +707,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
       } catch (_: Throwable) {
       }
+    }
+  }
+
+  private fun startRecorderOrNull(): SessionRecorder? {
+    return try {
+      SessionRecorder(ctx).apply { start(sampleRateHz = rawSampleRateHz) }
+    } catch (e: Exception) {
+      Log.e(TAG, "Could not start session recording", e)
+      null
     }
   }
 
@@ -992,20 +805,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       var sampleClockMs = System.currentTimeMillis()
       var fractionalSampleMs = 0.0
       while (_ui.value.debugRawLoopEnabled) {
-        repeat(DEBUG_RAW_LOOP_CHUNK_SAMPLES) {
-          if (!_ui.value.debugRawLoopEnabled) return@launch
-          handleRawSample(
-            raw = samples[sampleIndex],
-            source = RawSignalSource.DEBUG_REPLAY,
-            receivedAtMs = System.currentTimeMillis(),
-            sampleTimestampMs = sampleClockMs,
-          )
-          sampleIndex = (sampleIndex + 1) % samples.size
-          fractionalSampleMs += DEBUG_RAW_LOOP_SAMPLE_PERIOD_MS
-          val wholeMs = fractionalSampleMs.toLong()
-          if (wholeMs > 0L) {
-            sampleClockMs += wholeMs
-            fractionalSampleMs -= wholeMs.toDouble()
+        synchronized(lock) {
+          repeat(DEBUG_RAW_LOOP_CHUNK_SAMPLES) {
+            if (!_ui.value.debugRawLoopEnabled) return@synchronized
+            handleRawSample(
+              raw = samples[sampleIndex],
+              source = RawSignalSource.DEBUG_REPLAY,
+              receivedAtMs = System.currentTimeMillis(),
+              sampleTimestampMs = sampleClockMs,
+            )
+            sampleIndex = (sampleIndex + 1) % samples.size
+            fractionalSampleMs += DEBUG_RAW_LOOP_SAMPLE_PERIOD_MS
+            val wholeMs = fractionalSampleMs.toLong()
+            if (wholeMs > 0L) {
+              sampleClockMs += wholeMs
+              fractionalSampleMs -= wholeMs.toDouble()
+            }
           }
         }
         delay(DEBUG_RAW_LOOP_CHUNK_DELAY_MS)
@@ -1018,14 +833,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     debugRawReplayJob = null
   }
 
+  /** Called with [lock] held. */
   private fun handleThinkGearData(data: ThinkGearData) {
     when (data) {
-      is ThinkGearData.Battery -> _ui.update {
-        it.copy(
-          batteryPercent = data.value.coerceIn(0, 100),
-          sceneHudState = it.sceneHudState.copy(batteryPercent = data.value.coerceIn(0, 100)),
-        )
-      }
+      is ThinkGearData.Battery -> _ui.update { it.copy(batteryPercent = data.value.coerceIn(0, 100)) }
       is ThinkGearData.PoorSignal -> {
         appendDebugRawLoopCapturePoorSignal(data.value)
         _ui.update { it.copy(poorSignal = data.value) }
@@ -1043,6 +854,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
   }
 
+  /** Called with [lock] held. */
   private fun handleRawSample(
     raw: Int,
     source: RawSignalSource,
@@ -1068,16 +880,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       appendDebugRawLoopCapture(raw)
     }
 
-    recorder?.appendRaw(raw.toShort())
+    writeRecorderSafely { it.appendRaw(raw.toShort()) }
 
     if (_ui.value.sessionRunning && _ui.value.calibrating) addCalibrationRaw(raw)
 
     val features = eegProcessor.pushRaw(raw, sampleTimestampMs)
-
-    rawPreviewDecim++
-    if (!_ui.value.sessionPaused && rawPreviewDecim % 32 == 0) {
-      refreshRawPreview()
-    }
+    // The preview list is rebuilt by the preview ticker, off the Bluetooth reader thread.
+    rawPreviewDirty = true
 
     if (features == null) return
     if (!_ui.value.sessionRunning || _ui.value.sessionPaused) return
@@ -1155,50 +964,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       alertness = smoothedAlertness,
     )
 
-    gameSignalMapper.updateFromClassifier(
-      settledness = smoothedSettledness,
-      qualityConfidence = smoothedQualityConfidence,
-      mindWandering = smoothedProbabilities.mindWandering,
-      artefactScore = smoothedArtefact,
-      displayedDrowsyScore = displayedDrowsy,
-      control = smoothedControl,
-      effortfulFocus = smoothedProbabilities.effortfulFocus,
-      timestampMs = now,
-    )
-    sceneStateProducer.updateInputs(
-      SceneSignalInputs(
-        settledness = smoothedSettledness,
-        alertness = smoothedAlertness,
-        control = smoothedControl,
-        qualityConfidence = smoothedQualityConfidence,
-        artefactScore = smoothedArtefact,
-        effortfulFocus = smoothedProbabilities.effortfulFocus,
-        mindWandering = smoothedProbabilities.mindWandering,
-        displayedDrowsyScore = displayedDrowsy,
-        timestampMs = now,
-      )
-    )
-    val gameSignals = currentGameSignals(now, displayedState = displayedState, poorSignal = poorSignal)
-    val currentSceneState = currentSceneState()
-    val currentSceneHud = buildSceneHudState(
-      gameId = _ui.value.selectedGameId,
-      sceneState = currentSceneState,
-      stateLabel = displayedState,
-      poorSignal = poorSignal,
-      elapsedSeconds = _ui.value.sessionElapsedSec,
-      batteryPercent = _ui.value.batteryPercent,
-      inputEnabled = shouldEnableGameInput(_ui.value.selectedGameId),
-      inputHint = gameInputHint(_ui.value.selectedGameId, _ui.value.gameRunning),
-    )
-    val currentGameAudioState = buildSceneAudioState(
-      gameId = _ui.value.selectedGameId,
-      sceneState = currentSceneState,
-      muted = !shouldGameAudioBeAudible(),
-    )
-
     val shouldNoiseAudioRun = shouldNoiseAudioBeAudible()
     if (shouldNoiseAudioRun) {
-      ensureSessionAudioEngines()
+      ensureSessionAudioEngine()
       audio?.update(
         feedbackValue = feedback,
         invertReward = _ui.value.invertReward,
@@ -1212,33 +980,31 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       audio?.setMuted(true)
     }
 
-    recorder?.appendFeatures(
-      RecordedFeatureRow(
-        timestampMs = now,
-        poorSignal = poorSignal,
-        notch50Enabled = _ui.value.notch50Enabled,
-        features = features,
-        zScores = output.zScores,
-        quality = output.quality,
-        artefactCalibrationProfile = artefactCalibrationProfile,
-        rawProbabilities = output.probabilities,
-        smoothedProbabilities = smoothedProbabilities,
-        rawStateLabel = output.rawStateLabel,
-        displayedStateLabel = displayedState,
-        drowsinessEvidence = output.drowsinessEvidence,
-        displayedDrowsyScore = displayedDrowsy,
-        alertness = smoothedAlertness,
-        control = smoothedControl,
-        settledness = smoothedSettledness,
-        meditationProxy = smoothedMeditationProxy,
-        feedbackMetric = _ui.value.feedbackMetric,
-        feedbackValue = feedback,
-        selectedGameId = _ui.value.selectedGameId,
-        gameSignals = gameSignals,
-        sceneState = currentSceneState,
-        gameSummary = "${_ui.value.selectedGameId.name.lowercase()}:scene-progress=${"%.3f".format(Locale.US, currentSceneState.progress)}",
+    writeRecorderSafely {
+      it.appendFeatures(
+        RecordedFeatureRow(
+          timestampMs = now,
+          poorSignal = poorSignal,
+          notch50Enabled = _ui.value.notch50Enabled,
+          features = features,
+          zScores = output.zScores,
+          quality = output.quality,
+          artefactCalibrationProfile = artefactCalibrationProfile,
+          rawProbabilities = output.probabilities,
+          smoothedProbabilities = smoothedProbabilities,
+          rawStateLabel = output.rawStateLabel,
+          displayedStateLabel = displayedState,
+          drowsinessEvidence = output.drowsinessEvidence,
+          displayedDrowsyScore = displayedDrowsy,
+          alertness = smoothedAlertness,
+          control = smoothedControl,
+          settledness = smoothedSettledness,
+          meditationProxy = smoothedMeditationProxy,
+          feedbackMetric = _ui.value.feedbackMetric,
+          feedbackValue = feedback,
+        )
       )
-    )
+    }
 
     val avgMeditationProxy = if (statsCount == 0) 0f else statsSumMeditationProxy / statsCount.toFloat()
     val over80Seconds = (timeMeditationProxyOver80Ms / 1000L).toInt()
@@ -1269,20 +1035,39 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         artefactStall = output.quality.stall,
         artefactBlinkNormalizationHz = artefactCalibrationProfile.blinkNormalizationHz,
         artefactEmgNormalizationHfRatio = artefactCalibrationProfile.emgNormalizationHfRatio,
-        audioRunning = shouldNoiseAudioRun || shouldGameAudioBeAudible(),
-        audioMuted = !(shouldNoiseAudioRun || shouldGameAudioBeAudible()),
+        audioRunning = shouldNoiseAudioRun,
+        audioMuted = !shouldNoiseAudioRun,
         audioBaseDb = audio?.debugBaseDb ?: it.audioBaseDb,
-        sceneState = currentSceneState,
-        gameAudioState = currentGameAudioState,
-        sceneHudState = currentSceneHud,
       )
     }
 
     refreshMetricPlotSeries()
   }
 
+  /**
+   * A storage failure (disk full, card removed) stops recording for this session instead of
+   * propagating into the Bluetooth reader and looking like a headset disconnect.
+   */
+  private inline fun writeRecorderSafely(block: (SessionRecorder) -> Unit) {
+    val active = recorder ?: return
+    try {
+      block(active)
+    } catch (e: Exception) {
+      Log.e(TAG, "Session recording failed; recording stopped", e)
+      active.stop()
+      recorder = null
+    }
+  }
+
+  /** Called with [lock] held. */
   private fun finishCleanCalibration(now: Long, skipped: Boolean = false) {
-    scorer.setCalibration(calibration.buildCalibration())
+    val baseline = calibration.finish()
+    if (baseline != null) {
+      scorer.setCalibration(baseline)
+    }
+    // With no baseline (early skip) the scorer stays uncalibrated, which yields neutral z-scores
+    // instead of the saturated ones a 0-3 window baseline would produce. The adaptive window
+    // supplies a real baseline as soon as it holds enough clean windows.
     calibration.seedAdaptiveWindowFromCalibration()
     lastAdaptiveCalibrationUpdateMs = now
     applyCalibratedRawRangeIfNeeded()
@@ -1294,6 +1079,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         calibrationInstruction = calibrationInstructionFor(CalibrationPhase.BASELINE_COMPLETE),
         calibrationRemainingSec = 0,
         artefactCalibrationState = ArtefactCalibrationUiState(available = true),
+        baselineProvisional = baseline == null,
       )
     }
 
@@ -1354,8 +1140,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   private fun maybeUpdateAdaptiveCalibration(now: Long) {
     if (now - lastAdaptiveCalibrationUpdateMs < 1000L) return
-    calibration.buildAdaptiveCalibration()?.let { scorer.setCalibration(it) }
     lastAdaptiveCalibrationUpdateMs = now
+    val adaptive = calibration.buildAdaptiveCalibration() ?: return
+    scorer.setCalibration(adaptive)
+    if (_ui.value.baselineProvisional) {
+      _ui.update { it.copy(baselineProvisional = false) }
+    }
   }
 
   private fun cappedDisplayedDrowsy(output: ClassifierOutput): Float {
@@ -1404,90 +1194,47 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   private fun rewardSelectableMetrics(): Set<PlotType> = MetricGlossary.feedbackSourceMetrics().toSet()
 
-  private fun startGameLoop() {
-    gameLoopJob?.cancel()
-    gameLoopJob = viewModelScope.launch(Dispatchers.Default) {
-      while (_ui.value.sessionRunning) {
-        val now = System.currentTimeMillis()
-        sceneStateProducer.setPlayback(
-          active = _ui.value.sessionRunning && _ui.value.gameRunning,
-          frozen = _ui.value.sessionPaused ||
-            _ui.value.calibrating ||
-            _ui.value.artefactCalibrationState.running ||
-            _ui.value.gamePaused ||
-            _ui.value.selectedTab != AppTab.GAME,
-        )
-        sceneStateProducer.tick(now)
-        val sceneState = currentSceneState()
-        val nextGameAudioState = buildSceneAudioState(
-          gameId = _ui.value.selectedGameId,
-          sceneState = sceneState,
-          muted = !shouldGameAudioBeAudible(),
-        )
-
-        if (shouldGameAudioBeAudible()) {
-          ensureSessionAudioEngines()
-          gameAudio?.update(_ui.value.selectedGameId, nextGameAudioState)
-          gameAudio?.setMuted(false)
-        } else {
-          gameAudio?.setMuted(true)
-        }
-
-        _ui.update {
-          it.copy(
-            sceneState = sceneState,
-            gameAudioState = nextGameAudioState,
-            sceneHudState = buildSceneHudState(
-              gameId = it.selectedGameId,
-              sceneState = sceneState,
-              stateLabel = it.displayedStateLabel,
-              poorSignal = it.poorSignal,
-              elapsedSeconds = it.sessionElapsedSec,
-              batteryPercent = it.batteryPercent,
-              inputEnabled = shouldEnableGameInput(it.selectedGameId),
-              inputHint = gameInputHint(it.selectedGameId, it.gameRunning),
-            ),
-            audioRunning = shouldNoiseAudioBeAudible() || shouldGameAudioBeAudible(),
-            audioMuted = !(shouldNoiseAudioBeAudible() || shouldGameAudioBeAudible()),
-          )
-        }
-        delay(50L)
-      }
-    }
-  }
-
-  private fun drainGameEvents(): List<GameEvent> {
-    val drained = mutableListOf<GameEvent>()
-    while (true) {
-      val next = pendingGameEvents.poll() ?: break
-      drained += next
-    }
-    return drained
-  }
-
   private fun startStreamMonitor() {
     streamMonitorJob?.cancel()
     streamMonitorJob = viewModelScope.launch(Dispatchers.Default) {
       while (true) {
-        val snapshot = buildEegStreamSnapshot(
-          connected = _ui.value.connected,
-          debugReplayEnabled = _ui.value.debugRawLoopEnabled,
-          nowMs = System.currentTimeMillis(),
-          lastRawSampleAtMs = lastRawSampleAtMs,
-          firstRawBurstAtMs = firstRawBurstAtMs,
-          lastMeasuredSamplesPerSecond = lastMeasuredSamplesPerSecond,
-          rawCountThisSecond = rawCountThisSecond,
-          lastRateTickMs = lastRateTickMs,
-        )
-        _ui.update {
-          it.copy(
-            eegStreamStatus = snapshot.status,
-            eegStreamReady = snapshot.ready,
-            samplesPerSecond = snapshot.samplesPerSecond,
-            streamStallMs = snapshot.stallMs,
+        synchronized(lock) {
+          val snapshot = buildEegStreamSnapshot(
+            connected = _ui.value.connected,
+            debugReplayEnabled = _ui.value.debugRawLoopEnabled,
+            nowMs = System.currentTimeMillis(),
+            lastRawSampleAtMs = lastRawSampleAtMs,
+            firstRawBurstAtMs = firstRawBurstAtMs,
+            lastMeasuredSamplesPerSecond = lastMeasuredSamplesPerSecond,
+            rawCountThisSecond = rawCountThisSecond,
+            lastRateTickMs = lastRateTickMs,
           )
+          _ui.update {
+            it.copy(
+              eegStreamStatus = snapshot.status,
+              eegStreamReady = snapshot.ready,
+              samplesPerSecond = snapshot.samplesPerSecond,
+              streamStallMs = snapshot.stallMs,
+            )
+          }
         }
         delay(250L)
+      }
+    }
+  }
+
+  /** Rebuilds the raw-EEG preview at ~16 Hz when new samples arrived, off the Bluetooth thread. */
+  private fun startRawPreviewTicker() {
+    rawPreviewJob?.cancel()
+    rawPreviewJob = viewModelScope.launch(Dispatchers.Default) {
+      while (true) {
+        synchronized(lock) {
+          if (rawPreviewDirty && !_ui.value.sessionPaused && _ui.value.rawPlotOffsetSeconds == 0) {
+            rawPreviewDirty = false
+            refreshRawPreview()
+          }
+        }
+        delay(RAW_PREVIEW_REFRESH_MS)
       }
     }
   }
@@ -1500,180 +1247,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     firstRawBurstAtMs = 0L
   }
 
-  private fun shouldGameLoopRun(): Boolean {
-    return _ui.value.sessionRunning &&
-      !_ui.value.sessionPaused &&
-      !_ui.value.calibrating &&
-      !_ui.value.artefactCalibrationState.running &&
-      _ui.value.gameRunning &&
-      !_ui.value.gamePaused &&
-      _ui.value.selectedTab == AppTab.GAME
-  }
-
-  private fun canStartGame(): Boolean {
-    return _ui.value.sessionRunning &&
-      !_ui.value.sessionPaused &&
-      !_ui.value.calibrating &&
-      !_ui.value.artefactCalibrationState.running
-  }
-
-  private fun updateSkyTowerSettings(transform: (SkyTowerSettings) -> SkyTowerSettings) {
-    var updatedSettings = _ui.value.skyTowerSettings
-    _ui.update { current ->
-      updatedSettings = sanitizeSkyTowerSettings(transform(current.skyTowerSettings))
-      current.copy(skyTowerSettings = updatedSettings)
-    }
-    skyTowerSettingsStore.save(updatedSettings)
-  }
-
-  private fun shouldEnableGameInput(gameId: GameId): Boolean {
-    return shouldGameLoopRun() && gameId.isHybrid()
-  }
-
-  private fun isInkGardenAutoRefreshEligible(): Boolean {
-    return _ui.value.selectedGameId == GameId.INK_GARDEN &&
-      _ui.value.sessionRunning &&
-      _ui.value.gameRunning &&
-      !_ui.value.sessionPaused &&
-      !_ui.value.calibrating &&
-      !_ui.value.artefactCalibrationState.running &&
-      !_ui.value.gamePaused &&
-      _ui.value.selectedTab == AppTab.GAME
-  }
-
   private fun shouldNoiseAudioBeAudible(): Boolean {
     return _ui.value.audioEnabled &&
       _ui.value.sessionRunning &&
       !_ui.value.sessionPaused &&
       !_ui.value.calibrating &&
-      !_ui.value.artefactCalibrationState.running &&
-      _ui.value.selectedTab != AppTab.GAME
+      !_ui.value.artefactCalibrationState.running
   }
 
-  private fun shouldGameAudioBeAudible(): Boolean {
-    return _ui.value.audioEnabled &&
-      _ui.value.sessionRunning &&
-      !_ui.value.sessionPaused &&
-      !_ui.value.calibrating &&
-      !_ui.value.artefactCalibrationState.running &&
-      _ui.value.gameRunning &&
-      !_ui.value.gamePaused &&
-      _ui.value.selectedTab == AppTab.GAME
-  }
-
-  private fun currentGameSignals(
-    nowMs: Long,
-    displayedState: StateLabel = _ui.value.displayedStateLabel,
-    poorSignal: Int = _ui.value.poorSignal,
-  ): GameSignalSnapshot {
-    return gameSignalMapper.snapshot(
-      nowMs = nowMs,
-      stateLabel = displayedState,
-      poorSignal = poorSignal,
-      elapsedSeconds = _ui.value.sessionElapsedSec,
-      batteryPercent = _ui.value.batteryPercent,
-    )
-  }
-
-  private fun currentSceneState(): SceneState = sceneStateProducer.state.value
-
-  private fun requestNewInkGardenPictureInternal(
-    nowMs: Long,
-    preservePaused: Boolean,
-  ) {
-    val current = _ui.value.inkGarden
-    val nextVersion = current.pictureVersion + 1
-    val nextSeed = nextInkGardenCompositionSeed(nowMs = nowMs, version = nextVersion)
-    inkGardenRefreshTracker = InkGardenRefreshTracker(lastImprovementAtMs = nowMs)
-    _ui.update {
-      it.copy(
-        inkGarden = it.inkGarden.copy(
-          pictureVersion = nextVersion,
-          compositionSeed = nextSeed,
-          richness = 0f,
-          growthActive = false,
-          motifName = null,
-          brushPresetName = null,
-        ),
-        gamePaused = preservePaused,
-      )
-    }
-  }
-
-  private fun updateInkGardenSceneSettings(transform: (InkGardenSceneSettings) -> InkGardenSceneSettings) {
-    val updated = sanitizeInkGardenSceneSettings(transform(_ui.value.inkGarden.sceneSettings))
-    _ui.update {
-      it.copy(
-        inkGarden = it.inkGarden.copy(sceneSettings = updated),
-      )
-    }
-    inkGardenSceneSettingsStore.save(updated)
-  }
-
-  private fun sanitizeSkyTowerSettings(settings: SkyTowerSettings): SkyTowerSettings {
-    val clamped = settings.clamped()
-    if (!FeatureFlags.skyTowerCollapseModeEnabled) {
-      return clamped.copy(collapseEnabled = false)
-    }
-    return clamped
-  }
-
-  private fun sanitizeInkGardenSceneSettings(settings: InkGardenSceneSettings): InkGardenSceneSettings {
-    val clamped = settings.clamped()
-    if (!FeatureFlags.inkMagicalEffectsEnabled) {
-      return clamped.copy(
-        enhancedFxEnabled = false,
-        ghostTrailsEnabled = false,
-        goldDustEnabled = false,
-      )
-    }
-    return clamped
-  }
-
-  private fun nextInkGardenCompositionSeed(nowMs: Long, version: Int): Int {
-    val mixed = nowMs xor (version.toLong() shl 21) xor (sessionStartMs shl 7) xor (lastRawSampleAtMs shl 3)
-    val folded = (mixed xor (mixed ushr 32)).toInt()
-    val normalized = folded and Int.MAX_VALUE
-    return normalized.coerceAtLeast(1)
-  }
-
-  private fun refreshSelectedGameUi(nowMs: Long = System.currentTimeMillis()) {
-    val sceneState = currentSceneState()
-    _ui.update {
-      it.copy(
-        sceneState = sceneState,
-        gameAudioState = buildSceneAudioState(
-          gameId = it.selectedGameId,
-          sceneState = sceneState,
-          muted = !shouldGameAudioBeAudible(),
-        ),
-        sceneHudState = buildSceneHudState(
-          gameId = it.selectedGameId,
-          sceneState = sceneState,
-          stateLabel = it.displayedStateLabel,
-          poorSignal = it.poorSignal,
-          elapsedSeconds = it.sessionElapsedSec,
-          batteryPercent = it.batteryPercent,
-          inputEnabled = shouldEnableGameInput(it.selectedGameId),
-          inputHint = gameInputHint(it.selectedGameId, it.gameRunning),
-        ),
-      )
-    }
-  }
-
-  private fun gameInputHint(gameId: GameId, gameRunning: Boolean): String {
-    return when {
-      !_ui.value.sessionRunning -> "Start a headset session on Dashboard, then return here."
-      _ui.value.calibrating -> "Finish calibration, then press Start."
-      _ui.value.artefactCalibrationState.running -> "Finish artifact calibration or skip it, then press Start."
-      _ui.value.sessionPaused && gameRunning -> "Resume the session to continue ${gameId.displayName()}."
-      _ui.value.gamePaused && gameRunning -> "Press Resume to continue ${gameId.displayName()}."
-      !gameRunning -> gameId.startHint()
-      else -> gameId.inputHint()
-    }
-  }
-
-  private fun ensureSessionAudioEngines(fadeIn: Boolean = false) {
+  /** Called with [lock] held, so the engine can never be created twice or after the session stopped. */
+  private fun ensureSessionAudioEngine(fadeIn: Boolean = false) {
     if (!_ui.value.audioEnabled || !_ui.value.sessionRunning) return
     if (audio == null) {
       audio = NoiseAudioEngine().apply {
@@ -1689,63 +1272,28 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         )
       }
     }
-    if (gameAudio == null) {
-      gameAudio = GameSoundEngine().apply {
-        start()
-        setMuted(true)
-      }
-    }
     if (fadeIn) {
       audio?.beginFadeIn()
-      gameAudio?.beginFadeIn()
     }
   }
 
-  private fun shutdownAudioEngines() {
+  private fun shutdownAudioEngine() {
     audio?.setMuted(true)
-    gameAudio?.setMuted(true)
     audio?.stop()
-    gameAudio?.stop()
     audio = null
-    gameAudio = null
   }
 
   private fun syncFeedbackAudioState(fadeIn: Boolean = false) {
-    val shouldNoiseRun = shouldNoiseAudioBeAudible()
-    val shouldGameRun = shouldGameAudioBeAudible()
-
     if (!_ui.value.audioEnabled || !_ui.value.sessionRunning) {
-      shutdownAudioEngines()
-      _ui.update {
-        it.copy(
-          audioRunning = false,
-          audioMuted = true,
-          gameAudioState = it.gameAudioState.copy(muted = true),
-          sceneHudState = it.sceneHudState.copy(
-            inputEnabled = shouldEnableGameInput(it.selectedGameId),
-            inputHint = gameInputHint(it.selectedGameId, it.gameRunning),
-          ),
-        )
-      }
+      shutdownAudioEngine()
+      _ui.update { it.copy(audioRunning = false, audioMuted = true) }
       return
     }
 
-    ensureSessionAudioEngines(fadeIn = fadeIn)
+    val shouldNoiseRun = shouldNoiseAudioBeAudible()
+    ensureSessionAudioEngine(fadeIn = fadeIn)
     audio?.setMuted(!shouldNoiseRun)
-    gameAudio?.update(_ui.value.selectedGameId, _ui.value.gameAudioState)
-    gameAudio?.setMuted(!shouldGameRun)
-
-    _ui.update {
-      it.copy(
-        audioRunning = shouldNoiseRun || shouldGameRun,
-        audioMuted = !(shouldNoiseRun || shouldGameRun),
-        gameAudioState = it.gameAudioState.copy(muted = !shouldGameRun),
-        sceneHudState = it.sceneHudState.copy(
-          inputEnabled = shouldEnableGameInput(it.selectedGameId),
-          inputHint = gameInputHint(it.selectedGameId, it.gameRunning),
-        ),
-      )
-    }
+    _ui.update { it.copy(audioRunning = shouldNoiseRun, audioMuted = !shouldNoiseRun) }
   }
 
   private fun updatePlotSettings(
@@ -1855,7 +1403,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   private fun calibrationInstructionFor(phase: CalibrationPhase, remainingSeconds: Int = 0): String {
     return when (phase) {
       CalibrationPhase.EYES_OPEN -> {
-        val countdown = eyesClosedCountdownValue(remainingSeconds)
+        val countdown = calibrationEyesClosedCountdownValue(remainingSeconds)
         if (countdown != null) {
           ctx.getString(R.string.calibration_phase_eyes_open_countdown, countdown)
         } else {
@@ -1872,10 +1420,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       }
       CalibrationPhase.BASELINE_COMPLETE -> ctx.getString(R.string.calibration_phase_complete)
     }
-  }
-
-  private fun eyesClosedCountdownValue(remainingSeconds: Int): Int? {
-    return calibrationEyesClosedCountdownValue(remainingSeconds)
   }
 
   private fun artefactPromptLabel(prompt: ArtefactPrompt): String {
@@ -1895,13 +1439,38 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   override fun onCleared() {
     super.onCleared()
     sessionJob?.cancel()
-    gameLoopJob?.cancel()
     streamMonitorJob?.cancel()
+    rawPreviewJob?.cancel()
     debugRawReplayJob?.cancel()
-    shutdownAudioEngines()
-    client?.close()
-    client = null
+    synchronized(lock) {
+      shutdownAudioEngine()
+      recorder?.stop()
+      recorder = null
+      client?.close()
+      client = null
+    }
   }
+
+  private companion object {
+    const val TAG = "SamathaScope"
+  }
+}
+
+/**
+ * Picks which bonded headset the device menu shows: keep the current choice if it is still paired,
+ * otherwise the one remembered from the last run, otherwise the first paired device.
+ */
+internal fun resolveSelectedDeviceMac(
+  current: String?,
+  remembered: String?,
+  bonded: List<String>,
+): String? {
+  if (current != null && current in bonded) return current
+  if (remembered != null && remembered in bonded) return remembered
+  // Keep an unpaired remembered choice visible-but-unresolved rather than silently switching devices
+  // when the list is empty (e.g. Bluetooth still off at startup).
+  if (bonded.isEmpty()) return current ?: remembered
+  return bonded.first()
 }
 
 internal data class EegStreamSnapshot(
@@ -1972,6 +1541,7 @@ internal val METRIC_WINDOW_OPTIONS = listOf(60, 180, 300, 600)
 private const val EEG_STREAM_CONFIRM_MS = 600L
 private const val EEG_STREAM_STALE_MS = 900L
 private const val EEG_STREAM_READY_MIN_SAMPLES_PER_SECOND = 96f
+private const val RAW_PREVIEW_REFRESH_MS = 62L
 private const val DEBUG_RAW_LOOP_CHUNK_SAMPLES = 16
 private const val DEBUG_RAW_LOOP_CHUNK_DELAY_MS = 31L
 private val DEBUG_RAW_LOOP_SAMPLE_PERIOD_MS = 1000.0 / DEBUG_RAW_LOOP_SAMPLE_RATE_HZ.toDouble()

@@ -2,7 +2,6 @@
 
 import android.content.Context
 import android.content.SharedPreferences
-import com.mordin.samathascope.scene.tower.SkyTowerSettings
 
 interface KeyValueStore {
   fun getInt(key: String, defaultValue: Int): Int
@@ -83,36 +82,23 @@ fun createPlotSettingsStore(context: Context): PlotSettingsStore {
   return PlotSettingsStore(SharedPreferencesStore(prefs))
 }
 
-class SkyTowerSettingsStore(private val store: KeyValueStore) {
-  fun load(): SkyTowerSettings {
-    return SkyTowerSettings(
-      baseWidthScale = store.getFloat(KEY_BASE_WIDTH_SCALE, SkyTowerSettings.DEFAULT_BASE_WIDTH_SCALE),
-      carrierSpeedMultiplier = store.getFloat(KEY_CARRIER_SPEED_MULTIPLIER, SkyTowerSettings.DEFAULT_CARRIER_SPEED_MULTIPLIER),
-      irregularity = store.getFloat(KEY_IRREGULARITY, SkyTowerSettings.DEFAULT_IRREGULARITY),
-      collapseEnabled = store.getBoolean(KEY_COLLAPSE_ENABLED, SkyTowerSettings.DEFAULT_COLLAPSE_ENABLED),
-    ).clamped()
-  }
+/** Remembers the last Bluetooth headset the user picked so the device menu survives app restarts. */
+class DeviceSelectionStore(private val store: KeyValueStore) {
+  fun load(): String? = store.getString(KEY_SELECTED_DEVICE_MAC, "").takeIf { it.isNotBlank() }
 
-  fun save(settings: SkyTowerSettings) {
-    val clamped = settings.clamped()
-    store.putFloat(KEY_BASE_WIDTH_SCALE, clamped.baseWidthScale)
-    store.putFloat(KEY_CARRIER_SPEED_MULTIPLIER, clamped.carrierSpeedMultiplier)
-    store.putFloat(KEY_IRREGULARITY, clamped.irregularity)
-    store.putBoolean(KEY_COLLAPSE_ENABLED, clamped.collapseEnabled)
+  fun save(mac: String) {
+    store.putString(KEY_SELECTED_DEVICE_MAC, mac)
     store.apply()
   }
 
   private companion object {
-    const val KEY_BASE_WIDTH_SCALE = "sky_tower_base_width_scale"
-    const val KEY_CARRIER_SPEED_MULTIPLIER = "sky_tower_carrier_speed_multiplier"
-    const val KEY_IRREGULARITY = "sky_tower_irregularity"
-    const val KEY_COLLAPSE_ENABLED = "sky_tower_collapse_enabled"
+    const val KEY_SELECTED_DEVICE_MAC = "bt_selected_device_mac"
   }
 }
 
-fun createSkyTowerSettingsStore(context: Context): SkyTowerSettingsStore {
+fun createDeviceSelectionStore(context: Context): DeviceSelectionStore {
   val prefs = context.getSharedPreferences("samathascope_settings", Context.MODE_PRIVATE)
-  return SkyTowerSettingsStore(SharedPreferencesStore(prefs))
+  return DeviceSelectionStore(SharedPreferencesStore(prefs))
 }
 
 class NoiseColorStore(private val store: KeyValueStore) {

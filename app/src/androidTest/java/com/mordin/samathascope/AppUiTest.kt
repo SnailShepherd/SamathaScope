@@ -1,7 +1,7 @@
-package com.mordin.samathascope
+﻿package com.mordin.samathascope
 
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
@@ -20,24 +20,23 @@ class AppUiTest {
   fun tabLabels_areVisible() {
     composeRule.onNodeWithText("Dashboard").assertIsDisplayed()
     composeRule.onNodeWithText("Settings").assertIsDisplayed()
-    composeRule.onNodeWithText("Game").assertIsDisplayed()
     composeRule.onNodeWithText("Learn").assertIsDisplayed()
   }
 
   @Test
   fun learnTab_showsCalibrationAndGlossaryContent() {
     composeRule.onNodeWithText("Learn").performClick()
-    composeRule.onNodeWithText("Metric deep dive").assertIsDisplayed()
-    composeRule.onAllNodesWithText("Meditation Proxy (MP)")[0].assertIsDisplayed()
-    composeRule.onNodeWithText("Foundations").performClick()
-    composeRule.onNodeWithText("How calibration works").assertIsDisplayed()
+    composeRule.onNodeWithText("Metric deep dive").performScrollTo().assertIsDisplayed()
+    composeRule.onAllNodesWithText("Meditation Proxy (MP)")[0].performScrollTo().assertIsDisplayed()
+    composeRule.onNodeWithText("Foundations").performScrollTo().performClick()
+    composeRule.onNodeWithText("How calibration works").performScrollTo().assertIsDisplayed()
   }
 
   @Test
   fun dashboard_showsRawEegAndMetricExplorer() {
     composeRule.onNodeWithText("Dashboard").performClick()
-    composeRule.onNodeWithText("Session").assertIsDisplayed()
-    composeRule.onNodeWithText("Raw EEG").assertIsDisplayed()
+    composeRule.onNodeWithText("Session").performScrollTo().assertIsDisplayed()
+    composeRule.onAllNodesWithText("Raw EEG")[0].performScrollTo().assertIsDisplayed()
   }
 
   @Test
@@ -48,89 +47,32 @@ class AppUiTest {
   }
 
   @Test
-  fun gameTab_showsPickerAndMappings() {
-    composeRule.onNodeWithText("Game").performClick()
-    composeRule.onAllNodesWithText("Sky Tower", substring = false)[0].assertIsDisplayed()
-    composeRule.onNodeWithText("Game picker").performScrollTo().assertIsDisplayed()
-    composeRule.onNodeWithText("Start Sky Tower").performScrollTo().assertIsDisplayed()
-    composeRule.onNodeWithText("Sky Tower guide").performScrollTo().assertIsDisplayed()
-  }
-
-  @Test
-  fun gameTab_switchesBetweenHybridAndPassiveHints() {
-    composeRule.onNodeWithText("Game").performClick()
-    composeRule.onNodeWithText("Sky Tower guide").performScrollTo().assertIsDisplayed()
-    composeRule.onNodeWithText("Fire Keeper").performScrollTo().performClick()
-    composeRule.onNodeWithText("Start Fire Keeper").performScrollTo().assertIsDisplayed()
-    composeRule.onNodeWithText("Fire Keeper guide").performScrollTo().assertIsDisplayed()
-  }
-
-  @Test
-  fun skyTower_smokeTestWithDebugLoop() {
-    // 1. Enable debug replay on dashboard
+  fun debugLoop_skipCalibrationKeepsSessionRunning() {
     composeRule.onNodeWithText("Dashboard").performClick()
     composeRule.waitForIdle()
     composeRule.waitUntil(timeoutMillis = 5000) {
       composeRule.onAllNodesWithTag("dashboard_debug_raw_replay_toggle")
         .fetchSemanticsNodes().isNotEmpty()
     }
-    composeRule.onNodeWithTag("dashboard_debug_raw_replay_toggle").performClick()
+    composeRule.onNodeWithTag("dashboard_debug_raw_replay_toggle").performScrollTo().performClick()
 
-    // 2. Wait for EEG stream to init (eegStreamReady needs ~1-2s)
+    // eegStreamReady needs ~1-2 s of replayed samples.
     Thread.sleep(3000)
     composeRule.waitForIdle()
 
-    // 3. Start session (button should now be enabled)
-    composeRule.onNodeWithTag("dashboard_start_session").performClick()
+    composeRule.onNodeWithTag("dashboard_start_session").performScrollTo().performClick()
     composeRule.waitForIdle()
 
-    // 4. Let calibration run for ~10 seconds
-    Thread.sleep(10_000)
-    composeRule.waitForIdle()
-
-    // 5. Skip calibration
-    val skipCalibrationNodes = composeRule.onAllNodesWithTag("dashboard_skip_calibration")
-      .fetchSemanticsNodes()
-    if (skipCalibrationNodes.isNotEmpty()) {
-      composeRule.onNodeWithTag("dashboard_skip_calibration").performClick()
-      composeRule.waitForIdle()
-      Thread.sleep(2000)
-      composeRule.waitForIdle()
-    }
-
-    // 6. Skip artefact calibration if prompted
-    val artefactNodes = composeRule.onAllNodesWithTag("dashboard_skip_artefact_calibration")
-      .fetchSemanticsNodes()
-    if (artefactNodes.isNotEmpty()) {
-      composeRule.onNodeWithTag("dashboard_skip_artefact_calibration").performClick()
-      composeRule.waitForIdle()
-      Thread.sleep(1000)
-      composeRule.waitForIdle()
-    }
-
-    // 7. Navigate to Game tab → Sky Tower is default
-    composeRule.onNodeWithText("Game").performClick()
-    composeRule.waitForIdle()
-    Thread.sleep(1000)
-    composeRule.waitForIdle()
-
-    // 8. Start sky tower
-    composeRule.waitUntil(timeoutMillis = 5000) {
-      composeRule.onAllNodesWithTag("game_primary_action")
-        .fetchSemanticsNodes().isNotEmpty()
-    }
-    composeRule.onNodeWithTag("game_primary_action").performClick()
-    composeRule.waitForIdle()
+    // Skip early, before the baseline has enough windows; the session must keep running.
     Thread.sleep(2000)
-
-    // 8. Tap the canvas 20 times to drop stones
-    repeat(20) {
-      composeRule.onNodeWithTag("sky_tower_canvas").performClick()
-      Thread.sleep(700)
+    composeRule.waitForIdle()
+    if (composeRule.onAllNodesWithTag("dashboard_skip_calibration").fetchSemanticsNodes().isNotEmpty()) {
+      composeRule.onNodeWithTag("dashboard_skip_calibration").performScrollTo().performClick()
+      composeRule.waitForIdle()
     }
 
-    // 9. Verify the tower has grown
-    Thread.sleep(1000)
-    composeRule.onNodeWithTag("sky_tower_height").assertIsDisplayed()
+    Thread.sleep(3000)
+    composeRule.waitForIdle()
+    composeRule.onNodeWithText("Session").performScrollTo().assertIsDisplayed()
   }
 }

@@ -48,6 +48,7 @@ class CalibrationManager(
   private val nowMs: () -> Long = { System.currentTimeMillis() },
 ) {
   private var startedAtMs: Long = UNINITIALIZED_START_MS
+  private var finished = false
   private val samples = ArrayList<CalibrationFeatureSample>(calibrationSeconds * pointsPerSecond)
   private var selectedCalibrationSamples: List<CalibrationFeatureSample> = emptyList()
 
@@ -57,6 +58,7 @@ class CalibrationManager(
 
   fun reset() {
     startedAtMs = nowMs()
+    finished = false
     samples.clear()
     selectedCalibrationSamples = emptyList()
     adaptiveSamples.clear()
@@ -65,7 +67,7 @@ class CalibrationManager(
 
   fun addSample(features: EegFeatures, quality: QualityMetrics) {
     if (startedAtMs == UNINITIALIZED_START_MS) startedAtMs = nowMs()
-    if (isDone()) return
+    if (finished || isDone()) return
     samples += CalibrationFeatureSample(features = features, quality = quality)
   }
 
@@ -75,7 +77,23 @@ class CalibrationManager(
     return (calibrationSeconds - elapsed).coerceAtLeast(0)
   }
 
-  fun isDone(): Boolean = remainingSeconds() <= 0 && samples.size >= 20
+  fun isDone(): Boolean = remainingSeconds() <= 0 && samples.size >= MIN_BASELINE_SAMPLES
+
+  /**
+   * Ends the clean-calibration phase, either because the timer ran out or because the user skipped it.
+   *
+   * Returns the baseline, or null when too few windows were collected to build a trustworthy one
+   * (an early skip). In that case the caller should leave the scorer uncalibrated (neutral z-scores)
+   * and let [buildAdaptiveCalibration] supply the baseline once enough clean windows arrive.
+   */
+  fun finish(): Calibration? {
+    finished = true
+    if (samples.size < MIN_BASELINE_SAMPLES) {
+      selectedCalibrationSamples = emptyList()
+      return null
+    }
+    return buildCalibration()
+  }
 
   fun buildCalibration(): Calibration {
     val preferred = samples.filter { it.quality.isCalibrationClean }
@@ -102,13 +120,13 @@ class CalibrationManager(
   }
 
   fun addAdaptiveSample(features: EegFeatures, quality: QualityMetrics) {
-    if (!isDone()) return
+    if (!finished && !isDone()) return
     if (!quality.isCalibrationClean) return
     pushAdaptive(CalibrationFeatureSample(features = features, quality = quality))
   }
 
   fun buildAdaptiveCalibration(): Calibration? {
-    if (adaptiveSamples.size < 20) return null
+    if (adaptiveSamples.size < MIN_BASELINE_SAMPLES) return null
     return buildBaseline(adaptiveSamples.toList())
   }
 
@@ -201,5 +219,6 @@ class CalibrationManager(
 
   private companion object {
     const val UNINITIALIZED_START_MS = -1L
+    const val MIN_BASELINE_SAMPLES = 20
   }
 }

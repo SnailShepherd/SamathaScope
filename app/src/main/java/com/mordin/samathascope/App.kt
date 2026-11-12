@@ -4,8 +4,6 @@ import android.Manifest
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -24,7 +22,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.relocation.BringIntoViewRequester
@@ -45,12 +42,11 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -61,7 +57,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -72,10 +67,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.mordin.samathascope.scene.GameSceneHost
-import com.mordin.samathascope.scene.SceneSummary
-import com.mordin.samathascope.scene.defaultSummary
-import com.mordin.samathascope.scene.tower.SkyTowerSettings
 import kotlinx.coroutines.launch
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -137,7 +128,7 @@ private fun MainScreen(vm: MainViewModel) {
         .padding(padding)
         .fillMaxSize()
     ) {
-      TabRow(selectedTabIndex = ui.selectedTab.ordinal) {
+      PrimaryTabRow(selectedTabIndex = ui.selectedTab.ordinal) {
         AppTab.entries.forEach { tab ->
           Tab(
             selected = ui.selectedTab == tab,
@@ -185,26 +176,6 @@ private fun MainScreen(vm: MainViewModel) {
           onNotch50Change = vm::setNotch50Enabled,
           onStartDebugRawLoopCapture = vm::startDebugRawLoopCapture,
           onCancelDebugRawLoopCapture = vm::cancelDebugRawLoopCapture,
-          onSkyTowerBaseWidthScaleChange = vm::setSkyTowerBaseWidthScale,
-          onSkyTowerCarrierSpeedMultiplierChange = vm::setSkyTowerCarrierSpeedMultiplier,
-          onSkyTowerIrregularityChange = vm::setSkyTowerIrregularity,
-          onSkyTowerCollapseEnabledChange = vm::setSkyTowerCollapseEnabled,
-          onInkGardenEnhancedFxEnabledChange = vm::setInkGardenEnhancedFxEnabled,
-          onInkGardenGhostTrailsEnabledChange = vm::setInkGardenGhostTrailsEnabled,
-          onInkGardenGoldDustEnabledChange = vm::setInkGardenGoldDustEnabled,
-          onInkGardenEffectTriggerThresholdChange = vm::setInkGardenEffectTriggerThreshold,
-          onInkGardenEffectStrengthChange = vm::setInkGardenEffectStrength,
-        )
-
-        AppTab.GAME -> GameTab(
-          ui = ui,
-          onSelectGame = vm::selectGame,
-          onStartGame = vm::startGame,
-          onToggleGamePause = vm::toggleGamePause,
-          onStopGame = vm::stopGame,
-          onSetInkGardenRefreshMode = vm::setInkGardenRefreshMode,
-          onRequestNewInkGardenPicture = vm::requestNewInkGardenPicture,
-          onInkGardenTelemetryChanged = vm::onInkGardenTelemetryChanged,
         )
 
         AppTab.LEARN -> LearnTab()
@@ -218,7 +189,6 @@ private fun tabLabel(tab: AppTab): String {
   return when (tab) {
     AppTab.DASHBOARD -> stringResource(R.string.tab_dashboard)
     AppTab.SETTINGS -> stringResource(R.string.tab_settings)
-    AppTab.GAME -> stringResource(R.string.tab_game)
     AppTab.LEARN -> stringResource(R.string.tab_learn)
   }
 }
@@ -525,10 +495,18 @@ private fun SessionSection(
     )
 
     Spacer(Modifier.height(8.dp))
+    if (ui.sessionRunning && !ui.calibrating && ui.baselineProvisional) {
+      Text(
+        stringResource(R.string.calibration_provisional_baseline),
+        style = MaterialTheme.typography.bodySmall,
+        modifier = Modifier.testTag("dashboard_provisional_baseline"),
+      )
+      Spacer(Modifier.height(4.dp))
+    }
     if (ui.calibrating) {
       Text(stringResource(R.string.calibrating_countdown, ui.calibrationRemainingSec), fontWeight = FontWeight.SemiBold)
       LinearProgressIndicator(
-        progress = ((60 - ui.calibrationRemainingSec).coerceIn(0, 60) / 60f),
+        progress = { (60 - ui.calibrationRemainingSec).coerceIn(0, 60) / 60f },
         modifier = Modifier.fillMaxWidth()
       )
       Text(ui.calibrationInstruction, style = MaterialTheme.typography.bodySmall)
@@ -651,15 +629,6 @@ private fun SettingsTab(
   onNotch50Change: (Boolean) -> Unit,
   onStartDebugRawLoopCapture: () -> Unit,
   onCancelDebugRawLoopCapture: () -> Unit,
-  onSkyTowerBaseWidthScaleChange: (Float) -> Unit,
-  onSkyTowerCarrierSpeedMultiplierChange: (Float) -> Unit,
-  onSkyTowerIrregularityChange: (Float) -> Unit,
-  onSkyTowerCollapseEnabledChange: (Boolean) -> Unit,
-  onInkGardenEnhancedFxEnabledChange: (Boolean) -> Unit,
-  onInkGardenGhostTrailsEnabledChange: (Boolean) -> Unit,
-  onInkGardenGoldDustEnabledChange: (Boolean) -> Unit,
-  onInkGardenEffectTriggerThresholdChange: (Float) -> Unit,
-  onInkGardenEffectStrengthChange: (Float) -> Unit,
 ) {
   Column(
     modifier = Modifier
@@ -715,132 +684,6 @@ private fun SettingsTab(
         onSelected = onMetricWindowChange,
       )
       Text(stringResource(R.string.settings_plot_helper), style = MaterialTheme.typography.bodySmall)
-    }
-
-    Panel {
-      Text("Sky Tower", fontWeight = FontWeight.SemiBold)
-      Spacer(Modifier.height(6.dp))
-      Text(
-        "Applies on the next Start or Stop -> Start.",
-        style = MaterialTheme.typography.bodySmall,
-      )
-      Spacer(Modifier.height(8.dp))
-
-      Text(
-        text = "Base width ${(ui.skyTowerSettings.baseWidthScale * 100f).roundToInt()}%",
-        style = MaterialTheme.typography.bodySmall,
-      )
-      Slider(
-        value = ui.skyTowerSettings.baseWidthScale,
-        onValueChange = onSkyTowerBaseWidthScaleChange,
-        valueRange = SkyTowerSettings.BASE_WIDTH_SCALE_RANGE,
-      )
-
-      Text(
-        text = "Carrier speed ${String.format(Locale.US, "%.2fx", ui.skyTowerSettings.carrierSpeedMultiplier)}",
-        style = MaterialTheme.typography.bodySmall,
-      )
-      Slider(
-        value = ui.skyTowerSettings.carrierSpeedMultiplier,
-        onValueChange = onSkyTowerCarrierSpeedMultiplierChange,
-        valueRange = SkyTowerSettings.CARRIER_SPEED_RANGE,
-      )
-
-      Text(
-        text = "Block irregularity ${(ui.skyTowerSettings.irregularity * 100f).roundToInt()}%",
-        style = MaterialTheme.typography.bodySmall,
-      )
-      Slider(
-        value = ui.skyTowerSettings.irregularity,
-        onValueChange = onSkyTowerIrregularityChange,
-        valueRange = SkyTowerSettings.IRREGULARITY_RANGE,
-      )
-      if (FeatureFlags.skyTowerCollapseModeEnabled) {
-        Spacer(Modifier.height(6.dp))
-        LabeledCheckbox(
-          checked = ui.skyTowerSettings.collapseEnabled,
-          label = stringResource(R.string.sky_tower_collapse_label),
-          onCheckedChange = onSkyTowerCollapseEnabledChange,
-        )
-        Text(
-          stringResource(R.string.sky_tower_collapse_helper),
-          style = MaterialTheme.typography.bodySmall,
-        )
-      } else {
-        Spacer(Modifier.height(6.dp))
-        Text(
-          stringResource(R.string.feature_rollout_disabled, stringResource(R.string.sky_tower_collapse_label)),
-          style = MaterialTheme.typography.bodySmall,
-        )
-      }
-    }
-
-    Panel {
-      Text(stringResource(R.string.ink_garden_settings_title), fontWeight = FontWeight.SemiBold)
-      Spacer(Modifier.height(6.dp))
-      Text(
-        stringResource(R.string.ink_garden_settings_helper),
-        style = MaterialTheme.typography.bodySmall,
-      )
-      Spacer(Modifier.height(8.dp))
-      if (!FeatureFlags.inkBrushPresetEngineEnabled) {
-        Text(
-          stringResource(R.string.feature_rollout_disabled, stringResource(R.string.ink_garden_settings_title)),
-          style = MaterialTheme.typography.bodySmall,
-        )
-      }
-      if (FeatureFlags.inkMagicalEffectsEnabled) {
-        LabeledCheckbox(
-          checked = ui.inkGarden.sceneSettings.enhancedFxEnabled,
-          label = stringResource(R.string.ink_garden_enhanced_fx_label),
-          onCheckedChange = onInkGardenEnhancedFxEnabledChange,
-        )
-        Text(
-          stringResource(R.string.ink_garden_enhanced_fx_helper),
-          style = MaterialTheme.typography.bodySmall,
-        )
-        Spacer(Modifier.height(6.dp))
-        LabeledCheckbox(
-          checked = ui.inkGarden.sceneSettings.ghostTrailsEnabled,
-          label = stringResource(R.string.ink_garden_ghost_trails_label),
-          onCheckedChange = onInkGardenGhostTrailsEnabledChange,
-        )
-        LabeledCheckbox(
-          checked = ui.inkGarden.sceneSettings.goldDustEnabled,
-          label = stringResource(R.string.ink_garden_gold_dust_label),
-          onCheckedChange = onInkGardenGoldDustEnabledChange,
-        )
-        Spacer(Modifier.height(6.dp))
-        Text(
-          stringResource(
-            R.string.ink_garden_effect_trigger_threshold,
-            (ui.inkGarden.sceneSettings.effectTriggerThreshold * 100f).roundToInt(),
-          ),
-          style = MaterialTheme.typography.bodySmall,
-        )
-        Slider(
-          value = ui.inkGarden.sceneSettings.effectTriggerThreshold,
-          onValueChange = onInkGardenEffectTriggerThresholdChange,
-          valueRange = InkGardenSceneSettings.EFFECT_TRIGGER_THRESHOLD_RANGE,
-        )
-        Text(
-          stringResource(
-            R.string.ink_garden_effect_strength,
-            (ui.inkGarden.sceneSettings.effectStrength * 100f).roundToInt(),
-          ),
-          style = MaterialTheme.typography.bodySmall,
-        )
-        Slider(
-          value = ui.inkGarden.sceneSettings.effectStrength,
-          onValueChange = onInkGardenEffectStrengthChange,
-          valueRange = InkGardenSceneSettings.EFFECT_STRENGTH_RANGE,
-        )
-      } else {
-        Text(
-          stringResource(R.string.feature_rollout_disabled, stringResource(R.string.ink_garden_enhanced_fx_label)),
-          style = MaterialTheme.typography.bodySmall,
-        )
-      }
     }
 
     Panel {
@@ -904,206 +747,6 @@ private fun SettingsTab(
 }
 
 @Composable
-private fun GameTab(
-  ui: UiState,
-  onSelectGame: (GameId) -> Unit,
-  onStartGame: () -> Unit,
-  onToggleGamePause: () -> Unit,
-  onStopGame: () -> Unit,
-  onSetInkGardenRefreshMode: (InkGardenRefreshMode) -> Unit,
-  onRequestNewInkGardenPicture: () -> Unit,
-  onInkGardenTelemetryChanged: (com.mordin.samathascope.scene.godot.InkGardenTelemetry) -> Unit,
-) {
-  val gameGuide = ui.selectedGameId.guide()
-  val gameCanStart = ui.sessionRunning && !ui.sessionPaused && !ui.calibrating && !ui.artefactCalibrationState.running && !ui.gameRunning
-  val canToggleGamePause = ui.gameRunning && !ui.sessionPaused && !ui.calibrating && !ui.artefactCalibrationState.running
-  val showInkGardenControls = ui.selectedGameId == GameId.INK_GARDEN
-  val canRequestInkGardenPicture = showInkGardenControls && ui.sessionRunning && ui.gameRunning
-  val pausedBySystem = ui.sessionPaused || ui.calibrating || ui.artefactCalibrationState.running || ui.selectedTab != AppTab.GAME
-  val sceneRunId = when (ui.selectedGameId) {
-    GameId.INK_GARDEN -> ui.inkGarden.pictureVersion
-    else -> ui.gameRunId
-  }
-  val primaryActionLabel = when {
-    !ui.gameRunning -> "Start ${ui.selectedGameId.displayName()}"
-    ui.gamePaused -> "Resume ${ui.selectedGameId.displayName()}"
-    else -> "Pause ${ui.selectedGameId.displayName()}"
-  }
-  var summary by remember(ui.selectedGameId, sceneRunId, ui.gameRunning) {
-    mutableStateOf(
-      when (ui.selectedGameId) {
-        GameId.INK_GARDEN -> SceneSummary("Garden richness", "${(ui.inkGarden.richness * 100f).toInt()}%")
-        else -> ui.selectedGameId.defaultSummary(ui.sceneState)
-      }
-    )
-  }
-  val startHelper = when {
-    !ui.sessionRunning -> "Start a headset session on Dashboard first."
-    ui.calibrating -> "Wait for the baseline calibration to finish."
-    ui.artefactCalibrationState.running -> "Finish or skip artifact calibration before starting the game."
-    ui.sessionPaused -> "Resume the headset session before continuing the game."
-    ui.gamePaused -> "Paused. Press Resume to continue the current scene."
-    ui.gameRunning -> "Running now. Pause to hold the scene or Stop for a fresh restart."
-    else -> "Selected only. The scene will stay still until you press Start."
-  }
-  Column(
-    modifier = Modifier
-      .fillMaxSize()
-      .verticalScroll(rememberScrollState())
-      .padding(12.dp),
-    verticalArrangement = Arrangement.spacedBy(12.dp)
-  ) {
-    Panel {
-      Text(ui.sceneHudState.title, fontWeight = FontWeight.SemiBold)
-      Spacer(Modifier.height(8.dp))
-      Text(ui.selectedGameId.description(), style = MaterialTheme.typography.bodySmall)
-      Spacer(Modifier.height(8.dp))
-      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Button(
-          onClick = {
-            if (ui.gameRunning) onToggleGamePause() else onStartGame()
-          },
-          enabled = if (ui.gameRunning) canToggleGamePause else gameCanStart,
-          modifier = Modifier
-            .weight(1f)
-            .testTag("game_primary_action"),
-        ) {
-          Text(primaryActionLabel)
-        }
-        OutlinedButton(
-          onClick = onStopGame,
-          enabled = ui.gameRunning,
-          modifier = Modifier.weight(1f),
-        ) {
-          Text("Stop")
-        }
-      }
-      Spacer(Modifier.height(6.dp))
-      Text(startHelper, style = MaterialTheme.typography.bodySmall)
-      if (showInkGardenControls) {
-        Spacer(Modifier.height(10.dp))
-        Text(stringResource(R.string.ink_garden_refresh_title), fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
-        Spacer(Modifier.height(6.dp))
-        InkGardenRefreshModeSelector(
-          selected = ui.inkGarden.refreshMode,
-          onSelect = onSetInkGardenRefreshMode,
-        )
-        Spacer(Modifier.height(6.dp))
-        OutlinedButton(
-          onClick = onRequestNewInkGardenPicture,
-          enabled = canRequestInkGardenPicture,
-          modifier = Modifier.fillMaxWidth(),
-        ) {
-          Text(stringResource(R.string.ink_garden_new_picture))
-        }
-        Text(
-          text = stringResource(
-            if (ui.inkGarden.refreshMode == InkGardenRefreshMode.AUTO) {
-              R.string.ink_garden_refresh_auto_helper
-            } else {
-              R.string.ink_garden_refresh_manual_helper
-            }
-          ),
-          style = MaterialTheme.typography.bodySmall,
-        )
-      }
-      Spacer(Modifier.height(8.dp))
-      GameSceneHost(
-        gameId = ui.selectedGameId,
-        runId = sceneRunId,
-        sceneState = ui.sceneState,
-        running = ui.gameRunning,
-        paused = ui.gamePaused || pausedBySystem,
-        inputEnabled = ui.sceneHudState.inputEnabled,
-        skyTowerSettings = ui.skyTowerSettings,
-        inkGardenSceneSettings = ui.inkGarden.sceneSettings,
-        inkGardenCompositionSeed = ui.inkGarden.compositionSeed,
-        onSummaryChanged = { summary = it },
-        onInkGardenTelemetryChanged = onInkGardenTelemetryChanged,
-      )
-      Spacer(Modifier.height(8.dp))
-      HudRow(label = summary.label, value = summary.value)
-      val motifName = ui.inkGarden.motifName
-      if (showInkGardenControls && !motifName.isNullOrBlank()) {
-        HudRow(
-          label = stringResource(R.string.ink_garden_motif),
-          value = motifName.replace('_', ' '),
-        )
-      }
-      val brushPresetName = ui.inkGarden.brushPresetName
-      if (showInkGardenControls && !brushPresetName.isNullOrBlank()) {
-        HudRow(
-          label = stringResource(R.string.ink_garden_brush_preset),
-          value = brushPresetName.replace('_', ' '),
-        )
-      }
-      HudRow(label = "Calmness", value = "${ui.sceneHudState.calmnessPercent}%")
-      HudRow(label = "Focus", value = "${ui.sceneHudState.focusPercent}%")
-      HudRow(label = "Stability", value = "${ui.sceneHudState.stabilityPercent}%")
-      HudRow(label = "Intensity", value = "${ui.sceneHudState.intensityPercent}%")
-      HudRow(label = "Drift", value = "${ui.sceneHudState.driftSignedPercent}%")
-      HudRow(label = stringResource(R.string.game_hud_state), value = stateLabelLabel(ui.sceneHudState.stateLabel))
-      HudRow(label = stringResource(R.string.game_hud_signal), value = "${ui.sceneHudState.poorSignal}")
-      HudRow(label = stringResource(R.string.game_hud_elapsed), value = "${ui.sceneHudState.elapsedSeconds}s")
-      if (shouldShowBatteryRow(ui.sceneHudState.batteryPercent)) {
-        HudRow(label = stringResource(R.string.game_hud_battery), value = "${ui.sceneHudState.batteryPercent}%")
-      }
-      Spacer(Modifier.height(4.dp))
-      Text(ui.sceneHudState.inputHint, style = MaterialTheme.typography.bodySmall)
-    }
-
-    Panel {
-      Text("Game picker", fontWeight = FontWeight.SemiBold)
-      Spacer(Modifier.height(6.dp))
-      GamePickerRow(
-        selected = ui.selectedGameId,
-        onSelect = onSelectGame,
-      )
-    }
-
-    Panel {
-      Text(gameGuide.title, fontWeight = FontWeight.SemiBold)
-      Spacer(Modifier.height(6.dp))
-      gameGuide.lines.forEach { line ->
-        Text(line, style = MaterialTheme.typography.bodySmall)
-      }
-    }
-  }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun InkGardenRefreshModeSelector(
-  selected: InkGardenRefreshMode,
-  onSelect: (InkGardenRefreshMode) -> Unit,
-) {
-  FlowRow(
-    modifier = Modifier.fillMaxWidth(),
-    horizontalArrangement = Arrangement.spacedBy(8.dp),
-    verticalArrangement = Arrangement.spacedBy(8.dp),
-  ) {
-    InkGardenRefreshMode.entries.forEach { mode ->
-      OutlinedButton(
-        onClick = { onSelect(mode) },
-        border = BorderStroke(
-          width = if (selected == mode) 2.dp else 1.dp,
-          color = if (selected == mode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-        ),
-      ) {
-        Text(
-          text = stringResource(
-            when (mode) {
-              InkGardenRefreshMode.AUTO -> R.string.ink_garden_refresh_mode_auto
-              InkGardenRefreshMode.MANUAL -> R.string.ink_garden_refresh_mode_manual
-            }
-          )
-        )
-      }
-    }
-  }
-}
-
-@Composable
 private fun DiagnosticsSection(ui: UiState) {
   Panel {
     Text(stringResource(R.string.section_diagnostics), fontWeight = FontWeight.SemiBold)
@@ -1114,8 +757,8 @@ private fun DiagnosticsSection(ui: UiState) {
     HudRow(label = stringResource(R.string.telemetry_poor_signal), value = "${ui.poorSignal}")
     HudRow(label = stringResource(R.string.telemetry_samples_per_second), value = "${ui.samplesPerSecond.roundToInt()}")
     HudRow(label = stringResource(R.string.telemetry_stall_ms), value = "${ui.streamStallMs} ms")
-    if (shouldShowBatteryRow(ui.batteryPercent)) {
-      HudRow(label = stringResource(R.string.game_hud_battery), value = "${ui.batteryPercent}%")
+    if (ui.batteryPercent != null) {
+      HudRow(label = stringResource(R.string.battery_label), value = "${ui.batteryPercent}%")
     }
 
     Spacer(Modifier.height(8.dp))
@@ -1370,7 +1013,7 @@ private fun ArtefactCalibrationCallout(
       Text(stringResource(R.string.artifact_calibration_title), fontWeight = FontWeight.SemiBold)
       Text(artefact.promptLabel, style = MaterialTheme.typography.bodySmall)
       LinearProgressIndicator(
-        progress = ((artefact.completedPrompts * 5f) + (5 - artefact.remainingSec)) / (artefact.totalPrompts * 5f),
+        progress = { ((artefact.completedPrompts * 5f) + (5 - artefact.remainingSec)) / (artefact.totalPrompts * 5f) },
         modifier = Modifier.fillMaxWidth()
       )
       Text(stringResource(R.string.artifact_calibration_remaining, artefact.remainingSec), style = MaterialTheme.typography.bodySmall)
@@ -1727,7 +1370,7 @@ private fun MetricBar(label: String, value: Float, emphasise: Boolean = false) {
       ValueText("${(value * 100).roundToInt()}%")
     }
     LinearProgressIndicator(
-      progress = value.coerceIn(0f, 1f),
+      progress = { value.coerceIn(0f, 1f) },
       modifier = Modifier.fillMaxWidth()
     )
   }
@@ -1846,95 +1489,6 @@ private fun MultiMetricPlot(
         path = path,
         color = metricColorFor(entry.key),
         style = Stroke(width = if (entry.key == PlotType.MEDITATION_PROXY) 3.8f else 3.0f),
-      )
-    }
-  }
-}
-
-@Composable
-private fun LanternScene(altitude: Float, glow: Float) {
-  val clampedAltitude = altitude.coerceIn(0f, 1f)
-  val glowStrength = glow.coerceIn(0f, 1f)
-  val colorScheme = MaterialTheme.colorScheme
-
-  Box(
-    modifier = Modifier
-      .fillMaxWidth()
-      .height(260.dp)
-      .background(
-        brush = Brush.verticalGradient(
-          listOf(
-            Color(0xFFDCE9EA),
-            colorScheme.surfaceVariant,
-            colorScheme.surface,
-          )
-        ),
-        shape = RoundedCornerShape(4.dp),
-      )
-      .border(1.dp, colorScheme.outline, RoundedCornerShape(4.dp))
-  ) {
-    Canvas(
-      modifier = Modifier
-        .fillMaxSize()
-        .padding(8.dp)
-    ) {
-      val w = size.width
-      val h = size.height
-      val horizonY = h * 0.72f
-
-      drawRect(
-        brush = Brush.verticalGradient(
-          listOf(
-            Color(0x00FFFFFF),
-            Color(0x22C9D7D9),
-            Color(0x33AABEC0),
-          )
-        ),
-        topLeft = Offset(0f, horizonY - h * 0.30f),
-        size = androidx.compose.ui.geometry.Size(w, h * 0.40f),
-      )
-
-      drawLine(
-        color = colorScheme.outline.copy(alpha = 0.5f),
-        start = Offset(0f, horizonY),
-        end = Offset(w, horizonY),
-        strokeWidth = 2f,
-      )
-
-      drawCircle(
-        color = Color(0x33F0B54D),
-        radius = h * (0.12f + glowStrength * 0.04f),
-        center = Offset(w * 0.5f, h * (0.65f - 0.42f * clampedAltitude)),
-      )
-
-      val lanternCenter = Offset(w * 0.5f, h * (0.72f - 0.50f * clampedAltitude))
-      val lanternRadius = h * 0.07f
-      drawCircle(
-        color = Color(0xFFF4B64B),
-        radius = lanternRadius,
-        center = lanternCenter,
-      )
-      drawCircle(
-        color = Color(0x66FFF4C7),
-        radius = lanternRadius * (1.5f + glowStrength * 0.6f),
-        center = lanternCenter,
-      )
-      drawLine(
-        color = Color(0xFF8E6130),
-        start = Offset(lanternCenter.x, lanternCenter.y + lanternRadius),
-        end = Offset(lanternCenter.x, lanternCenter.y + lanternRadius + h * 0.08f),
-        strokeWidth = 3f,
-      )
-
-      drawCircle(
-        color = Color(0x55FFFFFF),
-        radius = h * 0.18f,
-        center = Offset(w * 0.2f, horizonY + h * 0.06f),
-      )
-      drawCircle(
-        color = Color(0x33FFFFFF),
-        radius = h * 0.12f,
-        center = Offset(w * 0.78f, horizonY - h * 0.02f),
       )
     }
   }
