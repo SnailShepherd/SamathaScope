@@ -49,12 +49,16 @@ class ThinkGearParser {
         state = if (b == 0xAA) State.PLEN else State.SYNC1
       }
       State.PLEN -> {
-        if (b in 0..169) {
-          payloadLen = b
-          payloadPos = 0
-          state = State.PAYLOAD
-        } else {
-          state = State.SYNC1
+        when {
+          // Per the ThinkGear spec, a PLENGTH of 0xAA is just another SYNC byte: stay in sync.
+          b == 0xAA -> state = State.PLEN
+          b in 0..169 -> {
+            payloadLen = b
+            payloadPos = 0
+            // An empty payload goes straight to the checksum byte.
+            state = if (b == 0) State.CHK else State.PAYLOAD
+          }
+          else -> state = State.SYNC1
         }
       }
       State.PAYLOAD -> {
@@ -63,7 +67,9 @@ class ThinkGearParser {
       }
       State.CHK -> {
         val chk = b and 0xFF
-        val sum = payload.take(payloadLen).sumOf { it.toInt() and 0xFF } and 0xFF
+        var sum = 0
+        for (k in 0 until payloadLen) sum += payload[k].toInt() and 0xFF
+        sum = sum and 0xFF
         val expected = (255 - sum) and 0xFF
         if (chk == expected) {
           parsePayload(payload, payloadLen)

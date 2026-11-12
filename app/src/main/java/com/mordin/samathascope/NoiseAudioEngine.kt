@@ -167,7 +167,7 @@ class NoiseAudioEngine(
   }
 
   private fun dbToAmp(db: Float): Float {
-    return 10.0.pow((db / 20.0).toDouble()).toFloat()
+    return 10.0.pow(db / 20.0).toFloat()
   }
 
   private fun floatToPcm16(value: Float): Short {

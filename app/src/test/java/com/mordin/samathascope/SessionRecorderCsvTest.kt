@@ -1,6 +1,5 @@
 package com.mordin.samathascope
 
-import com.mordin.samathascope.scene.SceneState
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 
@@ -16,9 +15,9 @@ class SessionRecorderCsvTest {
     assertThat(header).contains("d_logit")
     assertThat(header).contains("displayed_drowsy_score")
     assertThat(header).contains("feedback_value")
-    assertThat(header).contains("selected_game_id")
-    assertThat(header).contains("game_correction_pulse")
-    assertThat(header).contains("scene_progress")
+    assertThat(header).doesNotContain("game_")
+    assertThat(header).doesNotContain("scene_")
+    assertThat(header.split(",").last()).isEqualTo("feedback_value")
   }
 
   @Test
@@ -55,37 +54,15 @@ class SessionRecorderCsvTest {
       meditationProxy = 0.6f,
       feedbackMetric = PlotType.MEDITATION_PROXY,
       feedbackValue = 0.55f,
-      selectedGameId = GameId.FIRE_KEEPER,
-      gameSignals = GameSignalSnapshot(
-        stability = 0.62f,
-        drift = 0.12f,
-        noise = 0.15f,
-        fatigue = 0.05f,
-        precision = 0.71f,
-        correctionPulse = 0.20f,
-      ),
-      sceneState = SceneState(
-        calmness = 0.64f,
-        focus = 0.58f,
-        stability = 0.72f,
-        intensity = 0.46f,
-        drift = -0.08f,
-        progress = 0.34f,
-        calmnessRate = 0.04f,
-        focusRate = -0.02f,
-        intensityRate = 0.10f,
-      ),
-      gameSummary = "height=0.540;smoke=0.110",
     )
 
     val csv = row.toCsvRow()
 
     assertThat(csv).contains("SETTLED")
     assertThat(csv).contains("MEDITATION_PROXY")
-    assertThat(csv).contains("FIRE_KEEPER")
     assertThat(csv).contains("1.250000")
     assertThat(csv).contains("0.200000")
-    assertThat(csv).contains("0.340000")
+    assertThat(csv.split(",")).hasSize(recordedFeatureCsvHeader().split(",").size)
   }
 
   private fun feature(): EegFeatures {

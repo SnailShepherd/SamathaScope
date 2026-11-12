@@ -1,108 +1,167 @@
 # SamathaScope
 
-SamathaScope is an Android neurofeedback app for MindWave Mobile 2. It uses a personalised frontal-state classifier instead of the retired alpha-heavy score and tries to reward relaxed alertness rather than quiet drowsiness.
+SamathaScope is an Android neurofeedback app for the NeuroSky MindWave Mobile 2 headset. It reads the raw single-channel frontal EEG over Bluetooth, builds a personal baseline, and classifies each second of signal with a frontal-state model that rewards relaxed alertness (settled, awake attention) and treats drowsiness separately. Feedback is delivered as calm background noise whose volume follows the metric you choose.
 
-Current app version: `0.7` (`versionCode 7`)
+Current version: `0.80` (`versionCode 9`)
 
-## What v0.7 includes
+## Features
 
-- 4-tab UI: `Dashboard`, `Settings`, `Game`, `Learn`
-- Session card source dropdown for dashboard audio: `Meditation Proxy`, `Settledness`, or `Alertness`
-- Scrollable raw and metric plots while the session is paused or stopped
-- Metric explorer with unlimited simultaneous visible lines, stable per-metric colors, thicker traces, and a live legend
-- Long-press on metric chips to focus the explainer instead of changing the source
-- Optional artefact calibration after the clean baseline
-- Decoupled game audio and dashboard audio with smoother tab crossfades
-- Four neurofeedback scenes:
-  - `Sky Tower` with composite painterly stones, a custom contained stack simulator, springy wobble tied to artefact score, frictional grip, and faster drops
-  - `Ink Garden` with watercolor-style pigment spread and splatter
-  - `Fire Keeper`
-  - `Scriptorium`
+### Dashboard
+- **Headset card**
+  - Lists your paired Bluetooth devices.
+  - Remembers the headset you last selected or connected to, across app restarts.
+  - Shows the Bluetooth link and raw-EEG stream state: waiting, confirming, live or stalled.
+  - Shows battery level, poor-signal value, samples per second and stream stall time.
+- **Raw EEG card:** a live scrolling plot of the raw signal.
+- **Session card**
+  - Start, pause, resume and stop a session.
+  - Shows elapsed time, the displayed state, the average Meditation Proxy, and the share of time with Meditation Proxy at or above 80%.
+  - Lets you choose which metric drives the audio feedback: `Meditation Proxy`, `Settledness` or `Alertness`.
+  - The Start button unlocks once a live raw-EEG stream has been confirmed.
+- **Metric explorer**
+  - Overlays any number of metric traces, each with a stable colour and a live legend.
+  - Tap a chip to show or hide its trace; hold a chip to open that metric's explanation.
+  - While a session is paused or stopped, drag the raw and metric plots back through older history.
+- **Diagnostics card**
+  - Current state label and signal reliability (high, moderate or low confidence).
+  - Settledness, Control, Alertness, Drowsy score and Quality confidence.
+  - The individual drowsiness evidence terms.
+  - Artefact breakdown: contact quality, EMG proxy, blinks and transients, clipping, packet stalls and 50 Hz line noise.
+  - The headset's own eSense Attention and Meditation values, for reference.
 
-## Quick use
+### Calibration
+- **Clean baseline:** 60 seconds, 30 with eyes open, then 30 with eyes closed. A bell sounds when it finishes.
+  - The baseline uses robust statistics (median and MAD) of the per-window features.
+  - It keeps adapting during the session from a rolling 10-minute window of clean signal.
+- **Skipping:** you can skip calibration at any time.
+  - If at least 20 analysis windows have been collected, the baseline is built from them.
+  - Otherwise scores stay neutral and the dashboard says so. A baseline builds automatically once about 20 seconds of clean signal arrive.
+- **Optional artefact calibration:** a short guided capture of eye movements, jaw clench and frown. It personalises the blink and muscle (EMG) thresholds and doesn't touch the clean baseline.
 
-1. Pair MindWave Mobile 2 in Android Bluetooth settings.
-2. Open `Dashboard`, grant Bluetooth permissions, select a paired device, and connect.
-3. Start a session and complete the 60-second clean calibration.
-4. Optionally run the short artefact calibration to personalise blink and muscle thresholds.
-5. In the `Session` card, choose the dashboard audio feedback source.
-6. In the metric explorer:
-   - tap chips to show or hide lines
-   - hold a chip to focus its explanation
-   - pause or stop the session, then drag plots to older history
-7. Use `Game` for the scene picker and `Learn` for glossary and caveats.
+### Audio feedback
+- Continuous noise in white, pink, brown or blue.
+- By default, better feedback makes it quieter. "Invert reward" makes better feedback louder instead.
+- Adjustable sensitivity curve (gamma) and minimum/maximum noise level in dB.
+- A test beep checks the output.
 
-## EEG pipeline summary
+### Settings
+- **Audio:** the feedback options above.
+- **Plots:** shared metric history window of 1, 3, 5 or 10 minutes.
+- **Data and filters**
+  - Local session recording.
+  - Optional 50 Hz notch filter.
+- **Debug raw replay**
+  - Capture 60 seconds of live raw EEG once.
+  - Loop it as the signal source to test the whole app without wearing the headset.
+  - A sample loop ships with the app, so replay works on a fresh install.
 
-- Raw EEG: `512 Hz`
-- Analysis window: last `8 s`
-- Update step: `1 s`
-- Main branch: detrend, optional `50 Hz` notch, `1-35 Hz` analysis
-- Parallel HF branch: detrend plus optional notch, used for `20-40 Hz` and line-noise diagnostics
-- PSD: Welch method with `2 s` segments and `50%` overlap
+### Learn
+- **How metrics work:** a deep dive into each metric, with explainers, interpretation notes and the assumptions behind single-channel frontal EEG.
+- **Foundations:** samatha and relaxed alertness, the frontal-state feedback proxy, why "settled" is not "drowsy", how calibration works, interpretation limits and a wellbeing note.
 
-Extracted features:
+## Quick start
 
-- `P_theta`: `4-7 Hz`
-- `P_alpha`: `8-12 Hz`
-- `P_beta`: `13-30 Hz`
-- `P_hf`: `20-40 Hz`
-- `TBR`: theta/beta ratio
-- `TAR`: theta/alpha ratio
-- `ABR`: alpha/beta ratio
-- spectral entropy over `4-30 Hz`
-- blink/transient rate
-- clipping and stall statistics
+1. Pair the MindWave Mobile 2 in Android's Bluetooth settings.
+2. Open SamathaScope. On the first launch, tap **Grant permissions**.
+3. On the **Dashboard**, pick the headset (it stays selected next time) and tap **Connect**.
+4. Wait for the stream state to show **Live raw EEG**, then tap **Start session**.
+5. Follow the calibration prompts: eyes open, then eyes closed.
+6. Optionally run the artefact calibration when it's offered.
+7. In the **Session** card, choose the feedback metric. Then meditate and let the audio guide you.
+8. Pause or stop to review the plots. Turn on recording in **Settings** to keep the data.
 
-## Feedback model summary
+## EEG pipeline
 
-Stage 1: quality gate
+- **Raw input:** 512 Hz, signed 16-bit samples, parsed from the ThinkGear packet protocol.
+- **Analysis window:** the last 8 s, updated every 1 s.
+- **Main branch:** detrend, optional 50 Hz notch, then analysis over 1–35 Hz.
+- **High-frequency branch:** detrend plus optional notch, for 20–40 Hz EMG and line-noise diagnostics.
+- **Power spectrum:** Welch method with 2 s segments and 50% overlap.
 
-- Uses poor contact, blinks/transients, EMG-like HF contamination, clipping, and packet stalls.
-- Contaminated windows become `SIGNAL_CONTAMINATED` and reward is faded down.
+Features computed for each window:
 
-Stage 2: drowsiness-first state classifier
+| Feature | Definition |
+|---|---|
+| `P_theta` | power 4–7 Hz |
+| `P_alpha` | power 8–12 Hz |
+| `P_beta` | power 13–30 Hz |
+| `P_hf` | power 20–40 Hz |
+| `TBR` | theta / beta |
+| `TAR` | theta / alpha |
+| `ABR` | alpha / beta |
+| entropy | spectral entropy over 4–30 Hz |
+| quality | blink/transient rate, clipping, packet stalls, poor-signal value |
 
-- `DROWSY` is estimated before meditation-style reward.
-- Clean, awake windows are classified as `SETTLED`, `EFFORTFUL_FOCUS`, `MIND_WANDERING`, or `UNCERTAIN`.
+## Feedback model
 
-Continuous dimensions:
+1. **Quality gate:**
+   - Inputs: poor contact, blinks and transients, EMG-like high-frequency power, clipping, and packet stalls.
+   - Contaminated windows are labelled `SIGNAL_CONTAMINATED`, and reward is faded down.
+2. **Drowsiness first:** `DROWSY` is estimated before any meditation-style reward is given.
+3. **State classification:** clean, awake windows are labelled `SETTLED`, `EFFORTFUL_FOCUS`, `MIND_WANDERING` or `UNCERTAIN`.
 
-- `Alertness = 1 - D`
+Continuous dimensions (each `z(...)` is a z-score against your baseline):
+
+- `Alertness = 1 - DrowsyScore`
 - `Control = sigmoid(-z(TBR))`
-- `Settledness = sigmoid(z(ABR) - 0.5*z(TAR))`
+- `Settledness = sigmoid(z(ABR) - 0.5 * z(TAR))`
 - `QualityConfidence = 1 - ArtefactScore`
 - `MeditationProxy = Settledness * Alertness * QualityConfidence`
 
-The games map these signals differently from the dashboard reward:
+The methodology in full is in [docs/samatha_score_methodology.md](docs/samatha_score_methodology.md).
 
-- `Settledness` -> stability/coherence
-- `Mind Wandering` -> drift/disorganization
-- `Artefact Score` -> glitches, splatter, tremor
-- `Effortful Focus` -> short rescue pulse
-- `Drowsiness` -> slow fatigue gate only
+## Recording
 
-## Recording output
-
-Enable recording in `Settings`.
-
-Session files are written under:
+When recording is on, each session is written to:
 
 `Android/data/com.mordin.samathascope/files/sessions/<timestamp>/`
 
-- `raw.raw16le` - signed int16 little-endian raw samples
-- `features.csv` - timestamps, feature values, z-scores, artefact terms, drowsiness evidence terms, classifier probabilities, selected dashboard source, selected game, and mapped game signals
-- `meta.txt` - basic session metadata
+- `raw.raw16le`: raw samples as signed int16, little-endian
+- `features.csv`: one row per analysis window, with:
+  - timestamps
+  - band powers and ratios, and their z-scores
+  - artefact terms and drowsiness evidence terms
+  - classifier probabilities and state
+  - the selected feedback source and its value
+- `meta.txt`: session metadata
 
-## Build and toolchain
+## Building
 
-- `compileSdk 36`
-- `targetSdk 35`
-- `minSdk 26`
-- AGP `8.13.2`
-- Gradle `8.13`
-- Kotlin `2.3.10`
-- Compose BOM `2026.02.01`
-- Java/Kotlin target `17`
+| Component | Version |
+|---|---|
+| Android Gradle Plugin | 9.5.1, with built-in Kotlin |
+| Gradle | 9.9.1 (wrapper included) |
+| Kotlin | 2.4.21 |
+| Compose BOM | 2026.09.00 |
+| compileSdk / targetSdk / minSdk | 37 / 36 / 26 |
+| Java target | 17 |
 
-If Android Studio reports a missing `gradle/wrapper/gradle-wrapper.jar`, copy it from a fresh empty Android Studio project and sync again.
+You need JDK 17 or newer. Android Studio's bundled JBR works.
+
+Open the project in Android Studio, or build from the command line:
+
+```bash
+./gradlew :app:assembleDebug
+```
+
+```bash
+./gradlew :app:testDebugUnitTest
+```
+
+```bash
+./gradlew :app:connectedDebugAndroidTest
+```
+
+The last command runs the instrumented UI tests on a connected device. When it finishes it uninstalls the app, which deletes the app's recordings.
+
+## Project layout
+
+- `app/src/main/java/com/mordin/samathascope/`
+  - `BluetoothMindWaveClient.kt`, `ThinkGearParser.kt`: RFCOMM link and packet parsing
+  - `EegProcessor.kt`: filtering, Welch PSD and feature extraction
+  - `CalibrationManager.kt`, `ScoreModel.kt`: baseline and frontal-state classifier
+  - `MainViewModel.kt`: session lifecycle, signal routing and state
+  - `NoiseAudioEngine.kt`, `BellSoundPlayer.kt`: audio feedback
+  - `SessionRecorder.kt`, `DebugRawLoopStore.kt`: recording and debug replay
+  - `App.kt`: Compose UI
+- `docs/`: methodology, Theravada context, and design notes

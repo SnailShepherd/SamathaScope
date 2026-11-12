@@ -4,7 +4,6 @@ import android.app.Application
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MainViewModelInstrumentedTest {
@@ -14,10 +13,10 @@ class MainViewModelInstrumentedTest {
     val app = ApplicationProvider.getApplicationContext<Application>()
     val vm = MainViewModel(app)
 
-    vm.selectTab(AppTab.GAME)
+    vm.selectTab(AppTab.SETTINGS)
 
     val state = vm.ui.value
-    assertEquals(AppTab.GAME, state.selectedTab)
+    assertEquals(AppTab.SETTINGS, state.selectedTab)
   }
 
   @Test
@@ -44,19 +43,5 @@ class MainViewModelInstrumentedTest {
     val state = vm.ui.value
     assertFalse(state.audioEnabled)
     assertFalse(state.audioRunning)
-  }
-
-  @Test
-  fun selectGame_updatesSelectedSceneAndHud() {
-    val app = ApplicationProvider.getApplicationContext<Application>()
-    val vm = MainViewModel(app)
-
-    vm.selectGame(GameId.SCRIPTORIUM)
-
-    val state = vm.ui.value
-    assertEquals(GameId.SCRIPTORIUM, state.selectedGameId)
-    assertFalse(state.gameRunning)
-    assertEquals("Scriptorium", state.sceneHudState.title)
-    assertTrue(state.sceneHudState.inputHint.contains("Start a headset session"))
   }
 }

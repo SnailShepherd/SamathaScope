@@ -1,9 +1,5 @@
 package com.mordin.samathascope
 
-import com.mordin.samathascope.scene.SceneHudState
-import com.mordin.samathascope.scene.SceneState
-import com.mordin.samathascope.scene.tower.SkyTowerSettings
-
 enum class PlotType {
   RAW,
   MEDITATION_PROXY,
@@ -22,7 +18,6 @@ enum class PlotType {
 enum class AppTab {
   DASHBOARD,
   SETTINGS,
-  GAME,
   LEARN,
 }
 
@@ -111,6 +106,8 @@ data class UiState(
   val calibrationInstruction: String = "",
   val calibrationRemainingSec: Int = 0,
   val artefactCalibrationState: ArtefactCalibrationUiState = ArtefactCalibrationUiState(),
+  /** True after an early calibration skip, until the adaptive window has enough clean windows for a baseline. */
+  val baselineProvisional: Boolean = false,
   val sessionElapsedSec: Int = 0,
 
   val meditationProxy: Float = 0f,
@@ -156,16 +153,6 @@ data class UiState(
 
   val recordingEnabled: Boolean = false,
   val lastRecordingPath: String? = null,
-
-  val selectedGameId: GameId = GameId.SKY_TOWER,
-  val gameRunning: Boolean = false,
-  val gamePaused: Boolean = false,
-  val gameRunId: Int = 0,
-  val inkGarden: InkGardenUiState = InkGardenUiState(),
-  val skyTowerSettings: SkyTowerSettings = SkyTowerSettings(),
-  val sceneState: SceneState = SceneState(),
-  val gameAudioState: GameAudioState = GameAudioState(muted = true),
-  val sceneHudState: SceneHudState = SceneHudState(),
 )
 
 fun defaultVisibleMetrics(): Set<PlotType> = linkedSetOf(

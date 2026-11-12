@@ -1,52 +1,34 @@
-plugins {
+﻿plugins {
   id("com.android.application")
-  id("org.jetbrains.kotlin.android")
   id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
   namespace = "com.mordin.samathascope"
-  compileSdk = 36
+  compileSdk = 37
 
   defaultConfig {
     applicationId = "com.mordin.samathascope"
     minSdk = 26
-    targetSdk = 35
-    versionCode = 8
-    versionName = "0.72"
+    targetSdk = 36
+    versionCode = 9
+    versionName = "0.80"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-
-    buildConfigField("boolean", "FEATURE_SKY_TOWER_COLLAPSE_MODE", "false")
-    buildConfigField("boolean", "FEATURE_INK_BRUSH_PRESET_ENGINE", "true")
-    buildConfigField("boolean", "FEATURE_INK_MAGICAL_EFFECTS", "true")
   }
 
   buildFeatures {
     compose = true
-    buildConfig = true
-  }
-
-  sourceSets {
-    getByName("main") {
-      assets.srcDirs("src/main/assets", "../godot")
-    }
   }
 
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_17
     targetCompatibility = JavaVersion.VERSION_17
   }
-
-  kotlin {
-    compilerOptions {
-      jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
-    }
-  }
 }
 
 dependencies {
-  val composeBom = platform("androidx.compose:compose-bom:2026.02.01")
+  val composeBom = platform("androidx.compose:compose-bom:2026.09.00")
   implementation(composeBom)
   androidTestImplementation(composeBom)
 
@@ -55,22 +37,15 @@ dependencies {
   implementation("androidx.compose.ui:ui-tooling-preview")
   debugImplementation("androidx.compose.ui:ui-tooling")
 
-  implementation("androidx.activity:activity-compose:1.12.4")
-  implementation("androidx.fragment:fragment-ktx:1.8.9")
-  implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
-  implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
-  implementation("androidx.ink:ink-authoring:1.0.0")
-  implementation("androidx.ink:ink-brush:1.0.0")
-  implementation("androidx.ink:ink-rendering:1.0.0")
-  implementation("androidx.ink:ink-strokes:1.0.0")
+  implementation("androidx.activity:activity-compose:1.13.0")
+  implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
+  implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
 
-  implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
-  implementation("org.dyn4j:dyn4j:5.0.2")
-  implementation("org.godotengine:godot:4.6.0.stable")
+  implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
 
   testImplementation("junit:junit:4.13.2")
-  testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
-  testImplementation("com.google.truth:truth:1.4.4")
+  testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
+  testImplementation("com.google.truth:truth:1.4.5")
 
   androidTestImplementation("androidx.test.ext:junit:1.3.0")
   androidTestImplementation("androidx.test:core-ktx:1.7.0")

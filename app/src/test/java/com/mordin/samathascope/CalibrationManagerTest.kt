@@ -51,6 +51,52 @@ class CalibrationManagerTest {
   }
 
   @Test
+  fun earlySkip_returnsNoBaselineButAdaptiveWindowStillFills() {
+    var now = 0L
+    val manager = CalibrationManager(calibrationSeconds = 60, nowMs = { now })
+    val scorer = ScoreModel()
+
+    manager.reset()
+    repeat(3) { index ->
+      val features = feature(index = index, logBeta = 0.2f)
+      manager.addSample(features = features, quality = scorer.quality(poorSignal = 10, features = features))
+    }
+    now = 5_000L
+
+    // Skipping with only 3 windows must not produce a degenerate baseline.
+    assertThat(manager.finish()).isNull()
+    manager.seedAdaptiveWindowFromCalibration()
+    assertThat(manager.buildAdaptiveCalibration()).isNull()
+
+    // The calibration timer never ran out, but clean windows must still be accepted after a skip.
+    repeat(20) {
+      val clean = feature(index = 100 + it, logBeta = 1.5f)
+      manager.addAdaptiveSample(clean, scorer.quality(poorSignal = 10, features = clean))
+    }
+    val adaptive = manager.buildAdaptiveCalibration()
+    assertThat(adaptive).isNotNull()
+    assertThat(adaptive!!.logBeta.median).isWithin(0.01f).of(1.5f)
+  }
+
+  @Test
+  fun finish_withEnoughSamplesBuildsBaselineAndStopsCollecting() {
+    var now = 0L
+    val manager = CalibrationManager(calibrationSeconds = 60, nowMs = { now })
+    val scorer = ScoreModel()
+
+    manager.reset()
+    repeat(25) { index ->
+      val features = feature(index = index, logBeta = 0.4f)
+      manager.addSample(features = features, quality = scorer.quality(poorSignal = 10, features = features))
+    }
+    now = 20_000L
+
+    val baseline = manager.finish()
+    assertThat(baseline).isNotNull()
+    assertThat(baseline!!.logBeta.median).isWithin(0.01f).of(0.4f)
+  }
+
+  @Test
   fun artefactCalibrationProfile_usesSeparateArtefactSamples() {
     val manager = CalibrationManager()
 

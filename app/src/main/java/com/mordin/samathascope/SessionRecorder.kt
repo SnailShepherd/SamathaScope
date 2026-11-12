@@ -1,7 +1,6 @@
 package com.mordin.samathascope
 
 import android.content.Context
-import com.mordin.samathascope.scene.SceneState
 import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileOutputStream
@@ -30,10 +29,6 @@ data class RecordedFeatureRow(
   val meditationProxy: Float,
   val feedbackMetric: PlotType,
   val feedbackValue: Float,
-  val selectedGameId: GameId,
-  val gameSignals: GameSignalSnapshot,
-  val sceneState: SceneState,
-  val gameSummary: String,
 )
 
 fun recordedFeatureCsvHeader(): String {
@@ -114,23 +109,6 @@ fun recordedFeatureCsvHeader(): String {
     "displayed_state_label",
     "feedback_metric",
     "feedback_value",
-    "selected_game_id",
-    "game_stability",
-    "game_drift",
-    "game_noise",
-    "game_fatigue",
-    "game_precision",
-    "game_correction_pulse",
-    "scene_calmness",
-    "scene_focus",
-    "scene_stability",
-    "scene_intensity",
-    "scene_drift",
-    "scene_progress",
-    "scene_calmness_rate",
-    "scene_focus_rate",
-    "scene_intensity_rate",
-    "game_summary",
   ).joinToString(",")
 }
 
@@ -214,23 +192,6 @@ fun RecordedFeatureRow.toCsvRow(): String {
     displayedStateLabel.name,
     feedbackMetric.name,
     float(feedbackValue),
-    selectedGameId.name,
-    float(gameSignals.stability),
-    float(gameSignals.drift),
-    float(gameSignals.noise),
-    float(gameSignals.fatigue),
-    float(gameSignals.precision),
-    float(gameSignals.correctionPulse),
-    float(sceneState.calmness),
-    float(sceneState.focus),
-    float(sceneState.stability),
-    float(sceneState.intensity),
-    float(sceneState.drift),
-    float(sceneState.progress),
-    float(sceneState.calmnessRate),
-    float(sceneState.focusRate),
-    float(sceneState.intensityRate),
-    gameSummary.replace(',', ';'),
   ).joinToString(",")
 }
 
@@ -242,9 +203,11 @@ class SessionRecorder(private val ctx: Context) {
   private var rawOut: BufferedOutputStream? = null
   private var featOut: PrintWriter? = null
 
+  /** Opens the session files. Throws if storage is unavailable; callers should treat that as "not recording". */
   fun start(sampleRateHz: Int) {
     val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-    sessionDir = File(ctx.getExternalFilesDir(null), "sessions/$ts")
+    val root = ctx.getExternalFilesDir(null) ?: ctx.filesDir
+    sessionDir = File(root, "sessions/$ts")
     sessionDir.mkdirs()
 
     File(sessionDir, "meta.txt").writeText(

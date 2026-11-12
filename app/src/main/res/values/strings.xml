@@ -1,12 +1,11 @@
 <resources>
   <string name="app_name">SamathaScope</string>
-  <string name="app_title">SamathaScope v0.7</string>
+  <string name="app_title">SamathaScope v0.80</string>
   <string name="settings">Settings</string>
 
   <string name="tab_dashboard">Dashboard</string>
   <string name="tab_settings">Settings</string>
   <string name="tab_signals">Signals</string>
-  <string name="tab_game">Game</string>
   <string name="tab_learn">Learn</string>
 
   <string name="section_headset">Headset</string>
@@ -58,6 +57,7 @@
   <string name="calibration_phase_eyes_closed">Relax your face and close your eyes.</string>
   <string name="calibration_phase_eyes_closed_now">Relax your face and close your eyes now.</string>
   <string name="calibration_phase_complete">Baseline calibration complete.</string>
+  <string name="calibration_provisional_baseline">Calibration was skipped before enough data was collected. Scores stay neutral until about 20 seconds of clean signal have built a baseline.</string>
   <string name="skip_calibration">Skip calibration</string>
   <string name="calibration_skip_helper">For faster smoke testing you can skip the countdown and use the best baseline available so far.</string>
   <string name="session_elapsed_label">Elapsed</string>
@@ -83,7 +83,7 @@
   <string name="reliability_message_contaminated">This window is contaminated, so reward and state labels are intentionally conservative.</string>
   <string name="reliability_message_low">Recent input quality is weak, so state interpretation may be unstable.</string>
   <string name="reliability_message_medium">Input quality is usable but mixed; treat short-term swings with caution.</string>
-  <string name="reliability_message_high">Input quality is strong enough for educational interpretation and gameplay feedback.</string>
+  <string name="reliability_message_high">Input quality is strong enough for educational interpretation and audio feedback.</string>
   <string name="metric_settledness">Settledness</string>
   <string name="metric_control">Control</string>
   <string name="metric_alertness">Alertness</string>
@@ -145,35 +145,7 @@
   <string name="plot_y_min">Y minimum</string>
   <string name="plot_y_max">Y maximum</string>
   <string name="reset_plot_settings">Reset plot settings</string>
-
-  <string name="section_game">Visual feedback game</string>
-  <string name="game_scene_title">Neurofeedback scene</string>
-  <string name="game_hud_metric">Metric value</string>
-  <string name="game_hud_artefact">Artefact score</string>
-  <string name="game_hud_state">State</string>
-  <string name="game_hud_signal">Signal quality</string>
-  <string name="game_hud_elapsed">Elapsed time</string>
-  <string name="game_hud_battery">Battery</string>
-  <string name="ink_garden_refresh_title">Ink Garden refresh</string>
-  <string name="ink_garden_refresh_mode_auto">Auto</string>
-  <string name="ink_garden_refresh_mode_manual">Manual</string>
-  <string name="ink_garden_new_picture">New picture</string>
-  <string name="ink_garden_refresh_auto_helper">Auto mode starts a fresh picture after richness reaches 70%% and then stops improving for 5 seconds.</string>
-  <string name="ink_garden_refresh_manual_helper">Manual mode waits for the New picture button, so the current painting stays on paper until you choose the next one.</string>
-  <string name="ink_garden_motif">Motif</string>
-  <string name="ink_garden_brush_preset">Brush preset</string>
-  <string name="ink_garden_settings_title">Ink Garden</string>
-  <string name="ink_garden_settings_helper">Brush presets stay automatic, but you can tune whether optional magical overlays appear and how strong an EEG surge must be before they activate.</string>
-  <string name="ink_garden_enhanced_fx_label">Enable enhanced ink FX</string>
-  <string name="ink_garden_enhanced_fx_helper">Off by default for performance safety. When enabled, Ink Garden can add ghost trails and gold dust accents during stronger changes in focus or intensity.</string>
-  <string name="ink_garden_ghost_trails_label">Ghost trails</string>
-  <string name="ink_garden_gold_dust_label">Gold dust motes</string>
-  <string name="ink_garden_effect_trigger_threshold">FX trigger threshold: %1$d%%</string>
-  <string name="ink_garden_effect_strength">FX strength: %1$d%%</string>
-  <string name="feature_rollout_disabled">%1$s is currently disabled by rollout flag.</string>
-
-  <string name="sky_tower_collapse_label">Collapse on 3 consecutive misses</string>
-  <string name="sky_tower_collapse_helper">When enabled, three missed landings in a row trigger a collapse cascade that removes settled stones one by one before the next sequence begins.</string>
+  <string name="battery_label">Battery</string>
 
   <string name="settings_data_title">Data and filters</string>
   <string name="record_local">Record raw data and feature values locally</string>
@@ -181,7 +153,7 @@
   <string name="notch_50_enabled">Enable optional 50 Hz notch</string>
   <string name="notch_50_helper">Use only if mains contamination is still obvious. The main classifier already limits most analysis to 1-35 Hz.</string>
   <string name="debug_raw_replay_title">Debug raw replay</string>
-  <string name="debug_raw_replay_helper">Capture 60 seconds of live raw EEG once, then loop it as the source signal for smoke tests and scene debugging.</string>
+  <string name="debug_raw_replay_helper">Capture 60 seconds of live raw EEG once, then loop it as the source signal for smoke tests and debugging.</string>
   <string name="debug_raw_replay_capture">Capture 60s from live raw EEG</string>
   <string name="debug_raw_replay_cancel_capture">Cancel capture</string>
   <string name="debug_raw_replay_use_saved">Use saved debug loop as EEG source</string>
@@ -214,7 +186,7 @@
   <string name="learn_artifact_calibration_title">Optional artefact calibration</string>
   <string name="learn_artifact_calibration_body">After the clean baseline, you can run a short 25-second artefact capture. It records eye movements, jaw clench, and forehead tension so blink and EMG thresholds can be personalised without contaminating the clean meditation baseline.</string>
   <string name="learn_score_title">Frontal-state feedback proxy</string>
-  <string name="learn_score_body">The live reward is a personalised frontal-state classifier built from 8-second raw EEG windows. Dashboard audio uses the source chosen in the Session card, while the games use their own fixed multi-channel EEG mappings.</string>
+  <string name="learn_score_body">The live reward is a personalised frontal-state classifier built from 8-second raw EEG windows. Dashboard audio uses the source chosen in the Session card.</string>
   <string name="learn_metric_difference_title">Settled is not drowsy</string>
   <string name="learn_metric_difference_body">Drowsiness is estimated first so the app does not confuse sleepy theta-heavy slowing with useful meditation feedback. Its evidence combines TAR, TBR, entropy, and ABR, so a settled state here means relaxed and awake, not merely low-energy.</string>
   <string name="learn_caveat_title">Interpretation limits</string>
