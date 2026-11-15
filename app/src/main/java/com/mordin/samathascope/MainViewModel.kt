@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.media.AudioManager
 import android.media.ToneGenerator
 import android.os.Build
+import android.os.SystemClock
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -16,10 +17,16 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 import java.util.LinkedHashSet
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sqrt
@@ -32,33 +39,72 @@ import kotlin.math.sqrt
  */
 class MainViewModel(app: Application) : AndroidViewModel(app) {
 
-  private val ctx = app.applicationContext
+  // The application context (never an Activity), read through AndroidViewModel instead of a stored field.
+  private val ctx: Context get() = getApplication()
   private val lock = Any()
   private val rawSampleRateHz = DEBUG_RAW_LOOP_SAMPLE_RATE_HZ
   private val plotSettingsStore = createPlotSettingsStore(ctx)
   private val noiseColorStore = createNoiseColorStore(ctx)
   private val deviceSelectionStore = createDeviceSelectionStore(ctx)
+  private val sessionModeStore = createSessionModeStore(ctx)
+  private val userSettingsStore = createUserSettingsStore(ctx)
+  private val initialSettings = userSettingsStore.load()
   private val debugRawLoopStore = createDebugRawLoopStore(ctx)
-  private var debugRawLoopRecord: DebugRawLoopRecord? =
-    debugRawLoopStore.load(rawSampleRateHz * DEBUG_RAW_LOOP_DURATION_SECONDS)
-  private val debugRawLoopCaptureBuffer = IntArray(rawSampleRateHz * DEBUG_RAW_LOOP_DURATION_SECONDS)
-  private var debugRawLoopCaptureCount = 0
-  private var debugRawLoopCapturePoorSignalSum = 0L
-  private var debugRawLoopCapturePoorSignalCount = 0
-  private var debugRawLoopCaptureAttentionSum = 0L
-  private var debugRawLoopCaptureAttentionCount = 0
-  private var debugRawLoopCaptureMeditationSum = 0L
-  private var debugRawLoopCaptureMeditationCount = 0
+  /** Loaded off the main thread in init; null until then or if there is none. */
+  private var debugRawLoopRecord: DebugRawLoopRecord? = null
+  private val debugRawLoopCapture = DebugRawLoopCapture(rawSampleRateHz * DEBUG_RAW_LOOP_DURATION_SECONDS)
 
   private val _ui = MutableStateFlow(
     UiState(
       plotSettings = plotSettingsStore.load(),
       noiseColor = noiseColorStore.load(),
       selectedDeviceMac = deviceSelectionStore.load(),
-      debugRawLoopAvailable = debugRawLoopRecord != null,
+      sessionMode = sessionModeStore.load(),
+      audioEnabled = initialSettings.audioEnabled,
+      invertReward = initialSettings.invertReward,
+      gamma = initialSettings.gamma,
+      gMinDb = initialSettings.gMinDb,
+      gMaxDb = initialSettings.gMaxDb,
+      notch50Enabled = initialSettings.notch50Enabled,
+      recordingEnabled = initialSettings.recordingEnabled,
+      feedbackMetric = initialSettings.feedbackMetric,
+      visibleMetrics = initialSettings.visibleMetrics,
+      selectedMetricInfo = initialSettings.feedbackMetric,
+      themeMode = initialSettings.themeMode,
+      developerOptionsEnabled = initialSettings.developerOptionsEnabled,
     )
   )
   val ui: StateFlow<UiState> = _ui
+
+  /** The theme setting alone, so the activity root recomposes only when it changes. */
+  val themeMode: StateFlow<ThemeMode> = _ui
+    .map { it.themeMode }
+    .stateIn(viewModelScope, SharingStarted.Eagerly, _ui.value.themeMode)
+
+  // The raw preview changes ~16 times a second, so it has its own flow: only the raw plot recomposes.
+  private val _rawPreview = MutableStateFlow(IntArray(0))
+  val rawPreview: StateFlow<IntArray> = _rawPreview
+
+  private val feedbackAudio = FeedbackAudio(ctx) { onAudioFocusLost() }
+
+  private fun persistUserSettings() {
+    val state = _ui.value
+    userSettingsStore.save(
+      UserSettings(
+        audioEnabled = state.audioEnabled,
+        invertReward = state.invertReward,
+        gamma = state.gamma,
+        gMinDb = state.gMinDb,
+        gMaxDb = state.gMaxDb,
+        notch50Enabled = state.notch50Enabled,
+        recordingEnabled = state.recordingEnabled,
+        feedbackMetric = state.feedbackMetric,
+        visibleMetrics = state.visibleMetrics,
+        themeMode = state.themeMode,
+        developerOptionsEnabled = state.developerOptionsEnabled,
+      )
+    )
+  }
 
   private val btAdapter: BluetoothAdapter? by lazy {
     val mgr = ctx.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
@@ -68,24 +114,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   private var client: BluetoothMindWaveClient? = null
 
   private val eegProcessor = EegProcessor(sampleRateHz = rawSampleRateHz)
-  private val calibration = CalibrationManager(calibrationSeconds = 60)
+  // All internal timing (sample arrival, session clock, calibration) uses elapsedRealtime: monotonic,
+  // unaffected by wall-clock changes. Wall-clock time is used only for recorded timestamps.
+  private val calibration = CalibrationManager(calibrationSeconds = CALIBRATION_SECONDS, nowMs = SystemClock::elapsedRealtime)
+  /** The calibration baseline for this session's mode, or null if calibration produced none. */
+  private var sessionBaseline: Calibration? = null
   private val scorer = ScoreModel()
   private val metricHistory = MetricHistory(maxSeconds = 600, pointsPerSecond = 1)
 
-  private val contaminatedProbabilitySmoother = ExponentialSmoother(alpha = 0.3f)
-  private val drowsyProbabilitySmoother = ExponentialSmoother(alpha = 0.3f)
-  private val displayedDrowsySmoother = ExponentialSmoother(alpha = 0.15f)
-  private val settledProbabilitySmoother = ExponentialSmoother(alpha = 0.3f)
-  private val effortfulFocusProbabilitySmoother = ExponentialSmoother(alpha = 0.3f)
-  private val mindWanderingProbabilitySmoother = ExponentialSmoother(alpha = 0.3f)
-  private val uncertainProbabilitySmoother = ExponentialSmoother(alpha = 0.3f)
-  private val alertnessSmoother = ExponentialSmoother(alpha = 0.3f)
-  private val controlSmoother = ExponentialSmoother(alpha = 0.3f)
-  private val settlednessSmoother = ExponentialSmoother(alpha = 0.3f)
-  private val artefactSmoother = ExponentialSmoother(alpha = 0.3f)
-  private val qualityConfidenceSmoother = ExponentialSmoother(alpha = 0.3f)
-  private val meditationProxySmoother = ExponentialSmoother(alpha = 0.3f)
-  private val stateHoldSmoother = StateHoldSmoother()
+
+  private val outputSmoother = OutputSmoother()
 
   private val artefactPromptOrder = listOf(
     ArtefactPrompt.LOOK_LEFT_RIGHT,
@@ -95,10 +133,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     ArtefactPrompt.RELAX,
   )
 
-  private var statsSumMeditationProxy = 0f
-  private var statsCount = 0
-  private var timeMeditationProxyOver80Ms = 0L
-  private var lastFeatureTsMs = 0L
+  private val sessionStats = SessionStats()
 
   private var sessionStartMs: Long = 0L
   private var pausedAtMs: Long = 0L
@@ -107,15 +142,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   private var streamMonitorJob: Job? = null
   private var rawPreviewJob: Job? = null
 
-  private var audio: NoiseAudioEngine? = null
   private var recorder: SessionRecorder? = null
   private var debugRawReplayJob: Job? = null
 
+  private var lastRawValue = 0
   private var rawCountThisSecond = 0
   private var lastRateTickMs: Long = 0L
   private var lastMeasuredSamplesPerSecond = 0f
   private var lastRawSampleAtMs: Long = 0L
-  private var firstRawBurstAtMs: Long = 0L
   private var rawPreviewDirty = false
 
   private var lastAdaptiveCalibrationUpdateMs = 0L
@@ -126,7 +160,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   private var artefactPromptIndex = 0
   private var artefactPromptStartMs = 0L
   private var artefactCalibrationProfile = ArtefactCalibrationProfile()
-  private var drowsyDisplayWins = 0
 
   init {
     eegProcessor.setNotchEnabled(_ui.value.notch50Enabled)
@@ -139,6 +172,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     refreshMetricPlotSeries()
     startStreamMonitor()
     startRawPreviewTicker()
+    loadStoredDataInBackground()
+  }
+
+  /** Disk reads that would otherwise block the main thread while the app starts. */
+  private fun loadStoredDataInBackground() {
+    viewModelScope.launch(Dispatchers.IO) {
+      val hasRecordedSession = latestSessionDir(ctx) != null
+      val loop = debugRawLoopStore.load(rawSampleRateHz * DEBUG_RAW_LOOP_DURATION_SECONDS)
+      synchronized(lock) {
+        // A loop captured in the meantime is newer than the stored one.
+        if (debugRawLoopRecord == null) debugRawLoopRecord = loop
+        _ui.update {
+          it.copy(
+            recordedSessionAvailable = it.recordedSessionAvailable || hasRecordedSession,
+            debugRawLoopAvailable = debugRawLoopRecord != null,
+          )
+        }
+      }
+    }
   }
 
   private fun hasBluetoothConnectPermission(): Boolean {
@@ -147,14 +199,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   }
 
   fun onPermissionsResult(result: Map<String, Boolean>) {
-    val ok = if (Build.VERSION.SDK_INT >= 31) result.values.all { it } else true
+    val ok = Build.VERSION.SDK_INT < 31 || result[Manifest.permission.BLUETOOTH_CONNECT] == true
     _ui.update { it.copy(btPermissionGranted = ok) }
     if (ok) refreshBondedDevices()
   }
 
   fun refreshBondedDevices() {
-    val adapter = btAdapter ?: return
+    val adapter = btAdapter
+    if (adapter == null) {
+      _ui.update { it.copy(connectionError = ctx.getString(R.string.bt_error_unavailable)) }
+      return
+    }
     if (!_ui.value.btPermissionGranted && Build.VERSION.SDK_INT >= 31) return
+    // A refresh is the user's way to retry, so it replaces any earlier message.
+    val offMessage = if (adapter.isEnabled) null else ctx.getString(R.string.bt_error_off)
+    _ui.update { it.copy(connectionError = offMessage) }
 
     val bonded = try {
       adapter.bondedDevices?.map {
@@ -183,6 +242,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     deviceSelectionStore.save(mac)
   }
 
+  private fun nowMs(): Long = SystemClock.elapsedRealtime()
+
+  /** Changes take effect from the next session; the running session keeps its baseline. */
+  fun setSessionMode(mode: SessionMode) {
+    if (_ui.value.sessionRunning) return
+    _ui.update { it.copy(sessionMode = mode) }
+    sessionModeStore.save(mode)
+  }
+
   fun selectTab(tab: AppTab) {
     _ui.update { it.copy(selectedTab = tab) }
   }
@@ -190,11 +258,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   fun connect() {
     if (_ui.value.connected || _ui.value.headsetConnecting || _ui.value.debugRawLoopEnabled) return
     val mac = _ui.value.selectedDeviceMac ?: return
-    val adapter = btAdapter ?: return
+    val adapter = btAdapter
+    if (adapter == null) {
+      _ui.update { it.copy(connectionError = ctx.getString(R.string.bt_error_unavailable)) }
+      return
+    }
+    if (!adapter.isEnabled) {
+      _ui.update { it.copy(connectionError = ctx.getString(R.string.bt_error_off)) }
+      return
+    }
     val device = try {
       adapter.getRemoteDevice(mac)
     } catch (e: IllegalArgumentException) {
       Log.w(TAG, "Invalid Bluetooth address $mac", e)
+      _ui.update { it.copy(connectionError = ctx.getString(R.string.bt_error_invalid_address)) }
       return
     }
     deviceSelectionStore.save(mac)
@@ -208,6 +285,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     _ui.update {
       it.copy(
         headsetConnecting = true,
+        connectionError = null,
         connected = false,
         eegStreamStatus = EegStreamStatus.DISCONNECTED,
         eegStreamReady = false,
@@ -237,6 +315,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         synchronized(lock) {
           if (client !== newClient) return@synchronized
           if (error != null) Log.w(TAG, "Headset connection ended", error)
+          val message = ctx.getString(
+            if (_ui.value.connected) R.string.bt_error_connection_lost else R.string.bt_error_connect_failed
+          )
           client = null
           cancelDebugRawLoopCaptureLocked()
           resetStreamTracking()
@@ -244,6 +325,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
           _ui.update {
             it.copy(
               headsetConnecting = false,
+              connectionError = message,
               connected = false,
               eegStreamStatus = EegStreamStatus.DISCONNECTED,
               eegStreamReady = false,
@@ -293,19 +375,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       scorer.setArtefactCalibrationProfile(artefactCalibrationProfile)
       metricHistory.reset()
       resetRawCalibrationStats()
-      resetSmoothers()
+      outputSmoother.reset()
       calibration.resetArtefactCapture()
+      sessionBaseline = null
 
-      statsSumMeditationProxy = 0f
-      statsCount = 0
-      timeMeditationProxyOver80Ms = 0L
-      lastFeatureTsMs = 0L
+      sessionStats.reset()
       lastAdaptiveCalibrationUpdateMs = 0L
       eyesClosedCuePlayed = false
       artefactPromptIndex = 0
       artefactPromptStartMs = 0L
 
-      sessionStartMs = System.currentTimeMillis()
+      sessionStartMs = nowMs()
       pausedAtMs = 0L
       pausedAccumMs = 0L
 
@@ -323,7 +403,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       }
 
       recorder = if (_ui.value.recordingEnabled) startRecorderOrNull() else null
-      _ui.update { it.copy(lastRecordingPath = recorder?.sessionDir?.absolutePath) }
+      _ui.update {
+        it.copy(
+          lastRecordingPath = recorder?.sessionDir?.absolutePath,
+          recordingActive = recorder != null,
+          pausedByAudioFocus = false,
+        )
+      }
 
       _ui.update {
         it.copy(
@@ -352,7 +438,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
           drowsyAbrContribution = 0f,
           avgMeditationProxy = 0f,
           timeMeditationProxyOver80Seconds = 0,
-          audioRunning = audio != null && it.audioEnabled,
+          audioRunning = feedbackAudio.isActive && it.audioEnabled,
           audioMuted = true,
           metricPlotSeries = emptyMap(),
           rawPlotOffsetSeconds = 0,
@@ -366,10 +452,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       syncFeedbackAudioState(fadeIn = false)
     }
 
+    // Reached only when the session actually started (the guard above returns from startSession).
+    SessionKeepAliveService.start(ctx)
+
     sessionJob?.cancel()
     sessionJob = viewModelScope.launch(Dispatchers.Default) {
       while (_ui.value.sessionRunning) {
-        synchronized(lock) { tickSession(System.currentTimeMillis()) }
+        synchronized(lock) { tickSession(nowMs()) }
         delay(200)
       }
     }
@@ -382,7 +471,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     if (_ui.value.calibrating) {
       val rem = calibration.remainingSeconds()
-      val phase = if (rem > 30) CalibrationPhase.EYES_OPEN else CalibrationPhase.EYES_CLOSED
+      val phase = when (calibration.currentPhase()) {
+        SessionMode.EYES_OPEN -> CalibrationPhase.EYES_OPEN
+        SessionMode.EYES_CLOSED -> CalibrationPhase.EYES_CLOSED
+      }
       if (phase == CalibrationPhase.EYES_CLOSED && !eyesClosedCuePlayed) {
         eyesClosedCuePlayed = true
         if (_ui.value.audioEnabled) {
@@ -397,7 +489,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
           sessionElapsedSec = elapsedSec,
         )
       }
-      if (calibration.isDone()) {
+      // Finish when the timer runs out even if a stalled stream left too few windows: the half
+      // matching the session then yields no baseline, and scoring continues on a provisional one
+      // instead of the countdown sitting at 0 s.
+      if (rem <= 0) {
         finishCleanCalibration(now)
       }
     } else if (_ui.value.artefactCalibrationState.running) {
@@ -412,10 +507,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   private fun stopSessionLocked() {
     sessionJob?.cancel()
     sessionJob = null
+    if (_ui.value.sessionRunning) SessionKeepAliveService.stop(ctx)
 
     shutdownAudioEngine()
 
-    recorder?.stop()
+    if (recorder != null) {
+      writeRecorderSafely {
+        it.appendMeta(sessionEndMetadata(endedAtWallMs = System.currentTimeMillis(), durationMs = nowMs() - sessionStartMs))
+      }
+      recorder?.stop()
+      _ui.update { it.copy(recordedSessionAvailable = true) }
+    }
     recorder = null
     calibration.resetArtefactCapture()
     eyesClosedCuePlayed = false
@@ -426,6 +528,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       it.copy(
         sessionRunning = false,
         sessionPaused = false,
+        pausedByAudioFocus = false,
+        recordingActive = false,
         calibrating = false,
         calibrationPhase = null,
         calibrationInstruction = "",
@@ -441,19 +545,41 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   fun togglePause() = synchronized(lock) {
     if (!_ui.value.sessionRunning) return@synchronized
-    val now = System.currentTimeMillis()
-    if (!_ui.value.sessionPaused) {
-      pausedAtMs = now
-      _ui.update { it.copy(sessionPaused = true, audioMuted = true) }
-      syncFeedbackAudioState()
-    } else {
-      pausedAccumMs += (now - pausedAtMs).coerceAtLeast(0L)
-      pausedAtMs = 0L
-      _ui.update { it.copy(sessionPaused = false, rawPlotOffsetSeconds = 0, metricPlotOffsetSeconds = 0) }
-      refreshRawPreview()
-      refreshMetricPlotSeries()
-      syncFeedbackAudioState(fadeIn = true)
+    if (_ui.value.sessionPaused) resumeLocked() else pauseLocked()
+  }
+
+  /** Another app took the audio output: pause, as if the user pressed Pause. They resume manually. */
+  private fun onAudioFocusLost() = synchronized(lock) {
+    if (!_ui.value.sessionRunning || _ui.value.sessionPaused) return@synchronized
+    pauseLocked()
+    _ui.update { it.copy(pausedByAudioFocus = true) }
+  }
+
+  private fun pauseLocked() {
+    pausedAtMs = nowMs()
+    // Calibration and the artefact prompts are timed tasks; their clocks stop while paused.
+    calibration.pause()
+    _ui.update { it.copy(sessionPaused = true, audioMuted = true) }
+    syncFeedbackAudioState()
+  }
+
+  private fun resumeLocked() {
+    val now = nowMs()
+    // Focus may have gone to another app while paused; take it back for the feedback noise.
+    feedbackAudio.reacquireFocus()
+    val pausedForMs = (now - pausedAtMs).coerceAtLeast(0L)
+    pausedAccumMs += pausedForMs
+    pausedAtMs = 0L
+    calibration.resume()
+    if (_ui.value.artefactCalibrationState.running) artefactPromptStartMs += pausedForMs
+    // The paused stretch must not count towards "time over 80%".
+    sessionStats.markGap()
+    _ui.update {
+      it.copy(sessionPaused = false, pausedByAudioFocus = false, rawPlotOffsetSeconds = 0, metricPlotOffsetSeconds = 0)
     }
+    refreshRawPreview()
+    refreshMetricPlotSeries()
+    syncFeedbackAudioState(fadeIn = true)
   }
 
   fun toggleVisibleMetric(type: PlotType) = synchronized(lock) {
@@ -465,6 +591,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       next.add(type)
     }
     _ui.update { it.copy(visibleMetrics = next, selectedMetricInfo = type) }
+    persistUserSettings()
     refreshMetricPlotSeries()
   }
 
@@ -480,11 +607,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         selectedMetricInfo = value,
       )
     }
+    persistUserSettings()
     refreshMetricPlotSeries()
   }
 
   fun setAudioEnabled(value: Boolean) = synchronized(lock) {
     _ui.update { it.copy(audioEnabled = value) }
+    persistUserSettings()
     if (!value) {
       shutdownAudioEngine()
       _ui.update { it.copy(audioRunning = false, audioMuted = true) }
@@ -494,25 +623,71 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
   }
 
-  fun setInvertReward(value: Boolean) = _ui.update { it.copy(invertReward = value) }
+  fun setInvertReward(value: Boolean) {
+    _ui.update { it.copy(invertReward = value) }
+    persistUserSettings()
+  }
 
   fun setNoiseColor(value: NoiseColor) {
     _ui.update { it.copy(noiseColor = value) }
     noiseColorStore.save(value)
   }
 
-  fun setGamma(value: Float) = _ui.update { it.copy(gamma = value) }
+  fun setGamma(value: Float) {
+    _ui.update { it.copy(gamma = value) }
+    persistUserSettings()
+  }
 
-  fun setGMinDb(value: Int) = _ui.update { it.copy(gMinDb = min(value, it.gMaxDb - 1)) }
+  fun setGMinDb(value: Int) {
+    _ui.update { it.copy(gMinDb = min(value, it.gMaxDb - 1)) }
+    persistUserSettings()
+  }
 
-  fun setGMaxDb(value: Int) = _ui.update { it.copy(gMaxDb = max(value, it.gMinDb + 1)) }
+  fun setGMaxDb(value: Int) {
+    _ui.update { it.copy(gMaxDb = max(value, it.gMinDb + 1)) }
+    persistUserSettings()
+  }
 
-  fun setRecordingEnabled(value: Boolean) = _ui.update { it.copy(recordingEnabled = value) }
+  /** Takes effect from the next session. */
+  fun setRecordingEnabled(value: Boolean) {
+    _ui.update { it.copy(recordingEnabled = value) }
+    persistUserSettings()
+  }
+
+  /** Turning developer options off also leaves debug replay and any capture in progress. */
+  fun setDeveloperOptionsEnabled(value: Boolean) = synchronized(lock) {
+    if (!value) {
+      cancelDebugRawLoopCaptureLocked()
+      if (_ui.value.debugRawLoopEnabled && !_ui.value.sessionRunning) setDebugRawLoopEnabled(false)
+    }
+    _ui.update { it.copy(developerOptionsEnabled = value) }
+    persistUserSettings()
+  }
+
+  fun setThemeMode(value: ThemeMode) {
+    _ui.update { it.copy(themeMode = value) }
+    persistUserSettings()
+  }
+
+  /**
+   * Zips the most recent recorded session for sharing, off the main thread. Returns null if there is
+   * none or zipping failed. The UI disables sharing while a session is being recorded, so a
+   * half-written session is never offered.
+   */
+  suspend fun exportLatestSession(): File? = withContext(Dispatchers.IO) {
+    val dir = latestSessionDir(ctx) ?: return@withContext null
+    try {
+      zipSessionForSharing(ctx, dir)
+    } catch (e: Exception) {
+      Log.e(TAG, "Could not export session ${dir.name}", e)
+      null
+    }
+  }
 
   fun startDebugRawLoopCapture() = synchronized(lock) {
     if (_ui.value.debugRawLoopEnabled || _ui.value.debugRawLoopCapturing) return@synchronized
     if (!_ui.value.connected || !_ui.value.eegStreamReady) return@synchronized
-    resetDebugRawLoopCaptureCounters()
+    debugRawLoopCapture.reset()
     _ui.update {
       it.copy(
         debugRawLoopCapturing = true,
@@ -525,23 +700,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   private fun cancelDebugRawLoopCaptureLocked() {
     if (!_ui.value.debugRawLoopCapturing) return
-    resetDebugRawLoopCaptureCounters()
+    debugRawLoopCapture.reset()
     _ui.update {
       it.copy(
         debugRawLoopCapturing = false,
         debugRawLoopCapturedSeconds = 0,
       )
     }
-  }
-
-  private fun resetDebugRawLoopCaptureCounters() {
-    debugRawLoopCaptureCount = 0
-    debugRawLoopCapturePoorSignalSum = 0L
-    debugRawLoopCapturePoorSignalCount = 0
-    debugRawLoopCaptureAttentionSum = 0L
-    debugRawLoopCaptureAttentionCount = 0
-    debugRawLoopCaptureMeditationSum = 0L
-    debugRawLoopCaptureMeditationCount = 0
   }
 
   fun setDebugRawLoopEnabled(value: Boolean) = synchronized(lock) {
@@ -625,6 +790,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   fun setNotch50Enabled(value: Boolean) = synchronized(lock) {
     eegProcessor.setNotchEnabled(value)
     _ui.update { it.copy(notch50Enabled = value) }
+    persistUserSettings()
   }
 
   fun setMetricWindowSeconds(seconds: Int) = synchronized(lock) {
@@ -643,7 +809,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     if (!_ui.value.sessionRunning || _ui.value.calibrating) return@synchronized
     calibration.resetArtefactCapture()
     artefactPromptIndex = 0
-    artefactPromptStartMs = System.currentTimeMillis()
+    artefactPromptStartMs = nowMs()
     _ui.update {
       it.copy(
         artefactCalibrationState = ArtefactCalibrationUiState(
@@ -653,7 +819,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
           skipped = false,
           prompt = artefactPromptOrder.first(),
           promptLabel = artefactPromptLabel(artefactPromptOrder.first()),
-          remainingSec = 5,
+          remainingSec = ARTEFACT_PROMPT_SECONDS,
           completedPrompts = 0,
         ),
         selectedMetricInfo = PlotType.ARTEFACT_SCORE,
@@ -692,7 +858,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   fun skipCalibration() = synchronized(lock) {
     if (!_ui.value.sessionRunning || !_ui.value.calibrating) return@synchronized
-    finishCleanCalibration(now = System.currentTimeMillis(), skipped = true)
+    finishCleanCalibration(now = nowMs(), skipped = true)
   }
 
   fun testBeep() {
@@ -712,33 +878,47 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   private fun startRecorderOrNull(): SessionRecorder? {
     return try {
-      SessionRecorder(ctx).apply { start(sampleRateHz = rawSampleRateHz) }
+      SessionRecorder(ctx).apply {
+        start(
+          sampleRateHz = rawSampleRateHz,
+          metadata = sessionStartMetadata(
+            appVersion = appVersionName(ctx),
+            startedAtWallMs = System.currentTimeMillis(),
+            state = _ui.value,
+          ),
+        )
+      }
     } catch (e: Exception) {
       Log.e(TAG, "Could not start session recording", e)
       null
     }
   }
 
+  /** Called with [lock] held. */
   private fun appendDebugRawLoopCapture(raw: Int) {
-    if (!_ui.value.debugRawLoopCapturing) return
-    if (debugRawLoopCaptureCount >= debugRawLoopCaptureBuffer.size) return
+    if (!_ui.value.debugRawLoopCapturing || debugRawLoopCapture.isFull) return
+    debugRawLoopCapture.addSample(raw)
 
-    debugRawLoopCaptureBuffer[debugRawLoopCaptureCount] = raw
-    debugRawLoopCaptureCount++
-
-    val capturedSeconds = (debugRawLoopCaptureCount / rawSampleRateHz)
+    val capturedSeconds = (debugRawLoopCapture.samplesCaptured / rawSampleRateHz)
       .coerceIn(0, DEBUG_RAW_LOOP_DURATION_SECONDS)
     if (capturedSeconds != _ui.value.debugRawLoopCapturedSeconds) {
       _ui.update { it.copy(debugRawLoopCapturedSeconds = capturedSeconds) }
     }
+    if (!debugRawLoopCapture.isFull) return
 
-    if (debugRawLoopCaptureCount < debugRawLoopCaptureBuffer.size) return
-
-    val savedRecord = DebugRawLoopRecord(
-      samples = debugRawLoopCaptureBuffer.copyOf(),
-      metadata = buildDebugRawLoopMetadata(),
+    val savedRecord = debugRawLoopCapture.buildRecord(
+      fallback = DebugRawLoopMetadata(
+        poorSignal = _ui.value.poorSignal,
+        attention = _ui.value.attention,
+        meditation = _ui.value.meditation,
+      )
     )
-    debugRawLoopStore.save(savedRecord)
+    try {
+      debugRawLoopStore.save(savedRecord)
+    } catch (e: Exception) {
+      // Keep the loop for this run even if it can't be written; don't leave the capture stuck.
+      Log.e(TAG, "Could not save the debug raw loop", e)
+    }
     debugRawLoopRecord = savedRecord
     _ui.update {
       it.copy(
@@ -749,81 +929,36 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
   }
 
-  private fun appendDebugRawLoopCapturePoorSignal(value: Int) {
-    if (!_ui.value.debugRawLoopCapturing) return
-    debugRawLoopCapturePoorSignalSum += value.coerceIn(0, 255)
-    debugRawLoopCapturePoorSignalCount++
-  }
-
-  private fun appendDebugRawLoopCaptureAttention(value: Int) {
-    if (!_ui.value.debugRawLoopCapturing) return
-    debugRawLoopCaptureAttentionSum += value.coerceIn(0, 100)
-    debugRawLoopCaptureAttentionCount++
-  }
-
-  private fun appendDebugRawLoopCaptureMeditation(value: Int) {
-    if (!_ui.value.debugRawLoopCapturing) return
-    debugRawLoopCaptureMeditationSum += value.coerceIn(0, 100)
-    debugRawLoopCaptureMeditationCount++
-  }
-
-  private fun buildDebugRawLoopMetadata(): DebugRawLoopMetadata {
-    fun averaged(sum: Long, count: Int, fallback: Int, min: Int, max: Int): Int {
-      if (count <= 0) return fallback.coerceIn(min, max)
-      return (sum.toDouble() / count.toDouble()).toInt().coerceIn(min, max)
-    }
-
-    return DebugRawLoopMetadata(
-      poorSignal = averaged(
-        sum = debugRawLoopCapturePoorSignalSum,
-        count = debugRawLoopCapturePoorSignalCount,
-        fallback = _ui.value.poorSignal,
-        min = 0,
-        max = 255,
-      ),
-      attention = averaged(
-        sum = debugRawLoopCaptureAttentionSum,
-        count = debugRawLoopCaptureAttentionCount,
-        fallback = _ui.value.attention,
-        min = 0,
-        max = 100,
-      ),
-      meditation = averaged(
-        sum = debugRawLoopCaptureMeditationSum,
-        count = debugRawLoopCaptureMeditationCount,
-        fallback = _ui.value.meditation,
-        min = 0,
-        max = 100,
-      ),
-    )
-  }
-
   private fun startDebugRawReplay(samples: IntArray) {
     stopDebugRawReplay()
     debugRawReplayJob = viewModelScope.launch(Dispatchers.Default) {
+      // Paced by the clock, not by a fixed chunk per delay: timer overshoot would otherwise drop
+      // the replay below 512 samples/s and fail the stream's sample-rate check.
+      var baseMs = nowMs()
+      var emitted = 0L
       var sampleIndex = 0
-      var sampleClockMs = System.currentTimeMillis()
-      var fractionalSampleMs = 0.0
       while (_ui.value.debugRawLoopEnabled) {
         synchronized(lock) {
-          repeat(DEBUG_RAW_LOOP_CHUNK_SAMPLES) {
+          var due = (nowMs() - baseMs) * rawSampleRateHz / 1000L - emitted
+          if (due > rawSampleRateHz) {
+            // Fell far behind (e.g. the process was frozen): skip ahead instead of bursting.
+            baseMs = nowMs()
+            emitted = 0L
+            due = 0L
+          }
+          repeat(due.toInt()) {
             if (!_ui.value.debugRawLoopEnabled) return@synchronized
             handleRawSample(
               raw = samples[sampleIndex],
               source = RawSignalSource.DEBUG_REPLAY,
-              receivedAtMs = System.currentTimeMillis(),
-              sampleTimestampMs = sampleClockMs,
+              receivedAtMs = nowMs(),
+              sampleTimestampMs = baseMs + emitted * 1000L / rawSampleRateHz,
             )
             sampleIndex = (sampleIndex + 1) % samples.size
-            fractionalSampleMs += DEBUG_RAW_LOOP_SAMPLE_PERIOD_MS
-            val wholeMs = fractionalSampleMs.toLong()
-            if (wholeMs > 0L) {
-              sampleClockMs += wholeMs
-              fractionalSampleMs -= wholeMs.toDouble()
-            }
+            emitted++
           }
         }
-        delay(DEBUG_RAW_LOOP_CHUNK_DELAY_MS)
+        delay(DEBUG_RAW_LOOP_TICK_MS)
       }
     }
   }
@@ -838,42 +973,59 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     when (data) {
       is ThinkGearData.Battery -> _ui.update { it.copy(batteryPercent = data.value.coerceIn(0, 100)) }
       is ThinkGearData.PoorSignal -> {
-        appendDebugRawLoopCapturePoorSignal(data.value)
+        if (_ui.value.debugRawLoopCapturing) debugRawLoopCapture.addPoorSignal(data.value)
         _ui.update { it.copy(poorSignal = data.value) }
       }
       is ThinkGearData.Attention -> {
-        appendDebugRawLoopCaptureAttention(data.value)
+        if (_ui.value.debugRawLoopCapturing) debugRawLoopCapture.addAttention(data.value)
         _ui.update { it.copy(attention = data.value) }
       }
       is ThinkGearData.Meditation -> {
-        appendDebugRawLoopCaptureMeditation(data.value)
+        if (_ui.value.debugRawLoopCapturing) debugRawLoopCapture.addMeditation(data.value)
         _ui.update { it.copy(meditation = data.value) }
       }
       is ThinkGearData.RawSample -> handleRawSample(data.value, source = RawSignalSource.LIVE)
+      is ThinkGearData.PacketLoss -> {
+        // Placeholders keep the analysis window in real time and mark the loss as a signal gap.
+        // More than a window's worth would only overwrite itself.
+        repeat(data.lostSamples.coerceAtMost(rawSampleRateHz * ANALYSIS_WINDOW_SECONDS)) {
+          handleRawSample(lastRawValue, source = RawSignalSource.LIVE, lost = true)
+        }
+      }
       else -> Unit
     }
   }
 
-  /** Called with [lock] held. */
+  /**
+   * Called with [lock] held. [lost] marks a placeholder for a sample the parser reported lost: it
+   * holds the last value, is written to the recording so the raw file keeps real time, but doesn't
+   * count as received for the sample-rate check.
+   */
   private fun handleRawSample(
     raw: Int,
     source: RawSignalSource,
-    receivedAtMs: Long = System.currentTimeMillis(),
+    receivedAtMs: Long = nowMs(),
     sampleTimestampMs: Long = receivedAtMs,
+    lost: Boolean = false,
   ) {
     val now = receivedAtMs
 
-    if (lastRawSampleAtMs == 0L || now - lastRawSampleAtMs > EEG_STREAM_STALE_MS) {
-      firstRawBurstAtMs = now
-    }
-    lastRawSampleAtMs = now
+    if (!lost) {
+      // After a stall, measure the rate afresh rather than averaging the stall into it.
+      if (lastRawSampleAtMs == 0L || now - lastRawSampleAtMs > EEG_STREAM_STALE_MS) {
+        rawCountThisSecond = 0
+        lastRateTickMs = now
+        lastMeasuredSamplesPerSecond = 0f
+      }
+      lastRawSampleAtMs = now
+      lastRawValue = raw
 
-    if (lastRateTickMs == 0L) lastRateTickMs = now
-    rawCountThisSecond++
-    if (now - lastRateTickMs >= 1000L) {
-      lastMeasuredSamplesPerSecond = rawCountThisSecond * 1000f / max(1L, now - lastRateTickMs).toFloat()
-      rawCountThisSecond = 0
-      lastRateTickMs = now
+      rawCountThisSecond++
+      if (now - lastRateTickMs >= EEG_STREAM_RATE_WINDOW_MS) {
+        lastMeasuredSamplesPerSecond = rawCountThisSecond * 1000f / max(1L, now - lastRateTickMs).toFloat()
+        rawCountThisSecond = 0
+        lastRateTickMs = now
+      }
     }
 
     if (source == RawSignalSource.LIVE) {
@@ -882,9 +1034,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     writeRecorderSafely { it.appendRaw(raw.toShort()) }
 
-    if (_ui.value.sessionRunning && _ui.value.calibrating) addCalibrationRaw(raw)
+    if (!lost && _ui.value.sessionRunning && _ui.value.calibrating) addCalibrationRaw(raw)
 
-    val features = eegProcessor.pushRaw(raw, sampleTimestampMs)
+    val features = if (lost) {
+      eegProcessor.pushLost(sampleTimestampMs)
+    } else {
+      eegProcessor.pushRaw(raw, sampleTimestampMs)
+    }
     // The preview list is rebuilt by the preview ticker, off the Bluetooth reader thread.
     rawPreviewDirty = true
 
@@ -910,134 +1066,42 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     calibration.addAdaptiveSample(features = features, quality = output.quality)
     maybeUpdateAdaptiveCalibration(now)
 
-    val smoothedProbabilities = StateProbabilities(
-      contaminated = contaminatedProbabilitySmoother.add(output.probabilities.contaminated),
-      drowsy = drowsyProbabilitySmoother.add(output.probabilities.drowsy),
-      settled = settledProbabilitySmoother.add(output.probabilities.settled),
-      effortfulFocus = effortfulFocusProbabilitySmoother.add(output.probabilities.effortfulFocus),
-      mindWandering = mindWanderingProbabilitySmoother.add(output.probabilities.mindWandering),
-      uncertain = uncertainProbabilitySmoother.add(output.probabilities.uncertain),
-    )
-    val smoothedAlertness = alertnessSmoother.add(output.alertness)
-    val smoothedControl = controlSmoother.add(output.control)
-    val smoothedSettledness = settlednessSmoother.add(output.settledness)
-    val smoothedArtefact = artefactSmoother.add(output.quality.artefactScore)
-    val smoothedQualityConfidence = qualityConfidenceSmoother.add(output.qualityConfidence)
-    val smoothedMeditationProxy = meditationProxySmoother.add(output.meditationProxy)
-    val displayedDrowsy = displayedDrowsySmoother.add(cappedDisplayedDrowsy(output))
-    val gatedState = gatedDisplayState(output)
-    val displayedState = stateHoldSmoother.update(
-      candidate = gatedState,
-      confidence = smoothedProbabilities.valueFor(gatedState),
-    )
+    val smoothed = outputSmoother.update(output)
+    sessionStats.add(smoothed.meditationProxy, atMs = now)
+    metricHistory.add(smoothed.metricHistorySample(_ui.value.meditation, _ui.value.attention))
 
-    statsSumMeditationProxy += smoothedMeditationProxy
-    statsCount++
-    if (lastFeatureTsMs != 0L) {
-      val dt = (now - lastFeatureTsMs).coerceAtLeast(0L)
-      if (smoothedMeditationProxy >= 0.80f) {
-        timeMeditationProxyOver80Ms += dt
-      }
-    }
-    lastFeatureTsMs = now
-
-    metricHistory.add(
-      mapOf(
-        PlotType.MEDITATION_PROXY to smoothedMeditationProxy,
-        PlotType.SETTLEDNESS to smoothedSettledness,
-        PlotType.CONTROL to smoothedControl,
-        PlotType.ALERTNESS to smoothedAlertness,
-        PlotType.DROWSY_SCORE to displayedDrowsy,
-        PlotType.ARTEFACT_SCORE to smoothedArtefact,
-        PlotType.QUALITY_CONFIDENCE to smoothedQualityConfidence,
-        PlotType.EFFORTFUL_FOCUS_SCORE to smoothedProbabilities.effortfulFocus,
-        PlotType.MIND_WANDERING_SCORE to smoothedProbabilities.mindWandering,
-        PlotType.ESENSE_MEDITATION to _ui.value.meditation.toFloat(),
-        PlotType.ESENSE_ATTENTION to _ui.value.attention.toFloat(),
-      )
-    )
-
-    val feedback = rewardValueForType(
-      type = _ui.value.feedbackMetric,
-      meditationProxy = smoothedMeditationProxy,
-      settledness = smoothedSettledness,
-      alertness = smoothedAlertness,
-    )
-
-    val shouldNoiseAudioRun = shouldNoiseAudioBeAudible()
-    if (shouldNoiseAudioRun) {
+    val feedback = smoothed.feedbackValue(_ui.value.feedbackMetric)
+    val audible = shouldNoiseAudioBeAudible()
+    if (audible) {
       ensureSessionAudioEngine()
-      audio?.update(
-        feedbackValue = feedback,
-        invertReward = _ui.value.invertReward,
-        noiseColor = _ui.value.noiseColor,
-        gamma = _ui.value.gamma,
-        gMinDb = _ui.value.gMinDb,
-        gMaxDb = _ui.value.gMaxDb,
-      )
-      audio?.setMuted(false)
-    } else {
-      audio?.setMuted(true)
+      feedbackAudio.update(feedbackValue = feedback, settings = _ui.value.feedbackAudioSettings())
     }
+    feedbackAudio.setMuted(!audible)
 
     writeRecorderSafely {
       it.appendFeatures(
-        RecordedFeatureRow(
-          timestampMs = now,
-          poorSignal = poorSignal,
-          notch50Enabled = _ui.value.notch50Enabled,
+        recordedFeatureRow(
           features = features,
-          zScores = output.zScores,
-          quality = output.quality,
-          artefactCalibrationProfile = artefactCalibrationProfile,
-          rawProbabilities = output.probabilities,
-          smoothedProbabilities = smoothedProbabilities,
-          rawStateLabel = output.rawStateLabel,
-          displayedStateLabel = displayedState,
-          drowsinessEvidence = output.drowsinessEvidence,
-          displayedDrowsyScore = displayedDrowsy,
-          alertness = smoothedAlertness,
-          control = smoothedControl,
-          settledness = smoothedSettledness,
-          meditationProxy = smoothedMeditationProxy,
-          feedbackMetric = _ui.value.feedbackMetric,
+          output = output,
+          smoothed = smoothed,
+          atMs = now,
+          wallClockOffsetMs = System.currentTimeMillis() - SystemClock.elapsedRealtime(),
+          poorSignal = poorSignal,
+          state = _ui.value,
+          artefactProfile = artefactCalibrationProfile,
           feedbackValue = feedback,
         )
       )
     }
 
-    val avgMeditationProxy = if (statsCount == 0) 0f else statsSumMeditationProxy / statsCount.toFloat()
-    val over80Seconds = (timeMeditationProxyOver80Ms / 1000L).toInt()
-
     _ui.update {
-      it.copy(
-        meditationProxy = smoothedMeditationProxy,
-        settledness = smoothedSettledness,
-        control = smoothedControl,
-        alertness = smoothedAlertness,
-        drowsyScore = displayedDrowsy,
-        artefactScore = smoothedArtefact,
-        qualityConfidence = smoothedQualityConfidence,
-        effortfulFocusScore = smoothedProbabilities.effortfulFocus,
-        mindWanderingScore = smoothedProbabilities.mindWandering,
-        displayedStateLabel = displayedState,
-        drowsyTarContribution = output.drowsinessEvidence.tarContribution,
-        drowsyTbrContribution = output.drowsinessEvidence.tbrContribution,
-        drowsyEntropyContribution = output.drowsinessEvidence.entropyContribution,
-        drowsyAbrContribution = output.drowsinessEvidence.abrContribution,
-        avgMeditationProxy = avgMeditationProxy,
-        timeMeditationProxyOver80Seconds = over80Seconds,
-        artefactContact = output.quality.contact,
-        artefactLine = output.quality.lineNoise,
-        artefactEmg = output.quality.emg,
-        artefactBlink = output.quality.blink,
-        artefactClip = output.quality.clip,
-        artefactStall = output.quality.stall,
-        artefactBlinkNormalizationHz = artefactCalibrationProfile.blinkNormalizationHz,
-        artefactEmgNormalizationHfRatio = artefactCalibrationProfile.emgNormalizationHfRatio,
-        audioRunning = shouldNoiseAudioRun,
-        audioMuted = !shouldNoiseAudioRun,
-        audioBaseDb = audio?.debugBaseDb ?: it.audioBaseDb,
+      it.withWindowScore(
+        output = output,
+        smoothed = smoothed,
+        stats = sessionStats,
+        artefactProfile = artefactCalibrationProfile,
+        audioAudible = audible,
+        audioBaseDb = feedbackAudio.baseDb,
       )
     }
 
@@ -1056,19 +1120,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       Log.e(TAG, "Session recording failed; recording stopped", e)
       active.stop()
       recorder = null
+      _ui.update { it.copy(recordingActive = false, recordedSessionAvailable = true) }
     }
   }
 
   /** Called with [lock] held. */
   private fun finishCleanCalibration(now: Long, skipped: Boolean = false) {
-    val baseline = calibration.finish()
+    val baseline = calibration.finish(_ui.value.sessionMode)
+    sessionBaseline = baseline
+    writeRecorderSafely { it.appendMeta(baselineMetadata(baseline, skipped = skipped)) }
     if (baseline != null) {
       scorer.setCalibration(baseline)
     }
-    // With no baseline (early skip) the scorer stays uncalibrated, which yields neutral z-scores
-    // instead of the saturated ones a 0-3 window baseline would produce. The adaptive window
-    // supplies a real baseline as soon as it holds enough clean windows.
-    calibration.seedAdaptiveWindowFromCalibration()
+    // With no baseline (early skip, or too few windows in the half matching the session mode) the
+    // scorer stays uncalibrated, which yields neutral z-scores instead of the saturated ones a tiny
+    // baseline would produce. The adaptive window supplies a baseline once it holds enough clean
+    // session windows.
     lastAdaptiveCalibrationUpdateMs = now
     applyCalibratedRawRangeIfNeeded()
 
@@ -1091,7 +1158,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   private fun updateArtefactCaptureUi(now: Long, elapsedSec: Int) {
     val elapsedPromptMs = now - artefactPromptStartMs
-    if (elapsedPromptMs >= 5_000L) {
+    if (elapsedPromptMs >= ARTEFACT_PROMPT_SECONDS * 1000L) {
       artefactPromptIndex++
       if (artefactPromptIndex >= artefactPromptOrder.size) {
         artefactCalibrationProfile = calibration.buildArtefactCalibrationProfile()
@@ -1120,7 +1187,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     val prompt = artefactPromptOrder[artefactPromptIndex]
-    val remainingSec = (5 - (elapsedPromptMs / 1000L).toInt()).coerceIn(1, 5)
+    val remainingSec = (ARTEFACT_PROMPT_SECONDS - (elapsedPromptMs / 1000L).toInt()).coerceIn(1, ARTEFACT_PROMPT_SECONDS)
     _ui.update {
       it.copy(
         sessionElapsedSec = elapsedSec,
@@ -1141,56 +1208,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   private fun maybeUpdateAdaptiveCalibration(now: Long) {
     if (now - lastAdaptiveCalibrationUpdateMs < 1000L) return
     lastAdaptiveCalibrationUpdateMs = now
-    val adaptive = calibration.buildAdaptiveCalibration() ?: return
+    val adaptive = calibration.buildAdaptiveCalibration(prior = sessionBaseline) ?: return
     scorer.setCalibration(adaptive)
     if (_ui.value.baselineProvisional) {
       _ui.update { it.copy(baselineProvisional = false) }
     }
   }
 
-  private fun cappedDisplayedDrowsy(output: ClassifierOutput): Float {
-    val entropyNotSuppressed = output.zScores.entropy > -0.30f
-    val calmSettledWindow = !output.quality.isContaminated &&
-      output.settledness > 0.60f &&
-      output.qualityConfidence > 0.70f &&
-      entropyNotSuppressed
-    return if (calmSettledWindow) {
-      min(output.drowsyScore, 0.45f)
-    } else {
-      output.drowsyScore
-    }
-  }
-
-  private fun gatedDisplayState(output: ClassifierOutput): StateLabel {
-    if (output.rawStateLabel != StateLabel.DROWSY) {
-      drowsyDisplayWins = 0
-      return output.rawStateLabel
-    }
-    if (output.quality.isContaminated) {
-      drowsyDisplayWins = 0
-      return StateLabel.SIGNAL_CONTAMINATED
-    }
-    drowsyDisplayWins++
-    return if (output.drowsyScore > 0.80f || drowsyDisplayWins >= 5) {
-      StateLabel.DROWSY
-    } else {
-      StateLabel.UNCERTAIN
-    }
-  }
-
-  private fun rewardValueForType(
-    type: PlotType,
-    meditationProxy: Float,
-    settledness: Float,
-    alertness: Float,
-  ): Float {
-    return when (type) {
-      PlotType.MEDITATION_PROXY -> meditationProxy
-      PlotType.SETTLEDNESS -> settledness
-      PlotType.ALERTNESS -> alertness
-      else -> 0f
-    }
-  }
 
   private fun rewardSelectableMetrics(): Set<PlotType> = MetricGlossary.feedbackSourceMetrics().toSet()
 
@@ -1202,9 +1226,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
           val snapshot = buildEegStreamSnapshot(
             connected = _ui.value.connected,
             debugReplayEnabled = _ui.value.debugRawLoopEnabled,
-            nowMs = System.currentTimeMillis(),
+            nowMs = nowMs(),
             lastRawSampleAtMs = lastRawSampleAtMs,
-            firstRawBurstAtMs = firstRawBurstAtMs,
             lastMeasuredSamplesPerSecond = lastMeasuredSamplesPerSecond,
             rawCountThisSecond = rawCountThisSecond,
             lastRateTickMs = lastRateTickMs,
@@ -1229,7 +1252,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     rawPreviewJob = viewModelScope.launch(Dispatchers.Default) {
       while (true) {
         synchronized(lock) {
-          if (rawPreviewDirty && !_ui.value.sessionPaused && _ui.value.rawPlotOffsetSeconds == 0) {
+          // Skip the work while nothing on screen collects the preview (app in background, other
+          // tab). The dirty flag stays set, so it refreshes as soon as the plot is visible again.
+          val visible = _rawPreview.subscriptionCount.value > 0
+          if (visible && rawPreviewDirty && !_ui.value.sessionPaused && _ui.value.rawPlotOffsetSeconds == 0) {
             rawPreviewDirty = false
             refreshRawPreview()
           }
@@ -1244,7 +1270,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     lastRateTickMs = 0L
     lastMeasuredSamplesPerSecond = 0f
     lastRawSampleAtMs = 0L
-    firstRawBurstAtMs = 0L
   }
 
   private fun shouldNoiseAudioBeAudible(): Boolean {
@@ -1258,30 +1283,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   /** Called with [lock] held, so the engine can never be created twice or after the session stopped. */
   private fun ensureSessionAudioEngine(fadeIn: Boolean = false) {
     if (!_ui.value.audioEnabled || !_ui.value.sessionRunning) return
-    if (audio == null) {
-      audio = NoiseAudioEngine().apply {
-        start()
-        setMuted(true)
-        update(
-          feedbackValue = 0f,
-          invertReward = _ui.value.invertReward,
-          noiseColor = _ui.value.noiseColor,
-          gamma = _ui.value.gamma,
-          gMinDb = _ui.value.gMinDb,
-          gMaxDb = _ui.value.gMaxDb,
-        )
-      }
-    }
-    if (fadeIn) {
-      audio?.beginFadeIn()
-    }
+    feedbackAudio.ensureStarted(_ui.value.feedbackAudioSettings(), fadeIn)
   }
 
-  private fun shutdownAudioEngine() {
-    audio?.setMuted(true)
-    audio?.stop()
-    audio = null
-  }
+  private fun shutdownAudioEngine() = feedbackAudio.shutdown()
 
   private fun syncFeedbackAudioState(fadeIn: Boolean = false) {
     if (!_ui.value.audioEnabled || !_ui.value.sessionRunning) {
@@ -1292,7 +1297,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     val shouldNoiseRun = shouldNoiseAudioBeAudible()
     ensureSessionAudioEngine(fadeIn = fadeIn)
-    audio?.setMuted(!shouldNoiseRun)
+    feedbackAudio.setMuted(!shouldNoiseRun)
     _ui.update { it.copy(audioRunning = shouldNoiseRun, audioMuted = !shouldNoiseRun) }
   }
 
@@ -1323,11 +1328,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       val sampleCount = (setting.windowSeconds * historyRate).coerceAtLeast(24)
       eegProcessor.rawHistory(sampleCount, clampedOffset * historyRate)
     }
-    _ui.update {
-      it.copy(
-        rawPreview = values,
-        rawPlotOffsetSeconds = clampedOffset,
-      )
+    _rawPreview.value = PlotMath.minMaxDecimate(values, RAW_PREVIEW_MAX_POINTS)
+    if (_ui.value.rawPlotOffsetSeconds != clampedOffset) {
+      _ui.update { it.copy(rawPlotOffsetSeconds = clampedOffset) }
     }
   }
 
@@ -1352,24 +1355,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       PlotType.ESENSE_ATTENTION -> values.map { it.coerceIn(0f, 100f) }
       else -> values.map { (it * 100f).coerceIn(0f, 100f) }
     }
-  }
-
-  private fun resetSmoothers() {
-    contaminatedProbabilitySmoother.reset()
-    drowsyProbabilitySmoother.reset()
-    displayedDrowsySmoother.reset()
-    settledProbabilitySmoother.reset()
-    effortfulFocusProbabilitySmoother.reset()
-    mindWanderingProbabilitySmoother.reset()
-    uncertainProbabilitySmoother.reset()
-    alertnessSmoother.reset()
-    controlSmoother.reset()
-    settlednessSmoother.reset()
-    artefactSmoother.reset()
-    qualityConfidenceSmoother.reset()
-    meditationProxySmoother.reset()
-    stateHoldSmoother.reset()
-    drowsyDisplayWins = 0
   }
 
   private fun resetRawCalibrationStats() {
@@ -1412,7 +1397,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       }
 
       CalibrationPhase.EYES_CLOSED -> {
-        if (remainingSeconds == 30) {
+        if (remainingSeconds == CALIBRATION_SECONDS / 2) {
           ctx.getString(R.string.calibration_phase_eyes_closed_now)
         } else {
           ctx.getString(R.string.calibration_phase_eyes_closed)
@@ -1437,7 +1422,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   }
 
   override fun onCleared() {
-    super.onCleared()
     sessionJob?.cancel()
     streamMonitorJob?.cancel()
     rawPreviewJob?.cancel()
@@ -1449,6 +1433,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
       client?.close()
       client = null
     }
+    SessionKeepAliveService.stop(ctx)
   }
 
   private companion object {
@@ -1456,95 +1441,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   }
 }
 
-/**
- * Picks which bonded headset the device menu shows: keep the current choice if it is still paired,
- * otherwise the one remembered from the last run, otherwise the first paired device.
- */
-internal fun resolveSelectedDeviceMac(
-  current: String?,
-  remembered: String?,
-  bonded: List<String>,
-): String? {
-  if (current != null && current in bonded) return current
-  if (remembered != null && remembered in bonded) return remembered
-  // Keep an unpaired remembered choice visible-but-unresolved rather than silently switching devices
-  // when the list is empty (e.g. Bluetooth still off at startup).
-  if (bonded.isEmpty()) return current ?: remembered
-  return bonded.first()
-}
-
-internal data class EegStreamSnapshot(
-  val status: EegStreamStatus,
-  val ready: Boolean,
-  val samplesPerSecond: Float,
-  val stallMs: Long,
-)
-
-internal fun buildEegStreamSnapshot(
-  connected: Boolean,
-  debugReplayEnabled: Boolean,
-  nowMs: Long,
-  lastRawSampleAtMs: Long,
-  firstRawBurstAtMs: Long,
-  lastMeasuredSamplesPerSecond: Float,
-  rawCountThisSecond: Int,
-  lastRateTickMs: Long,
-): EegStreamSnapshot {
-  if (!connected && !debugReplayEnabled) {
-    return EegStreamSnapshot(
-      status = EegStreamStatus.DISCONNECTED,
-      ready = false,
-      samplesPerSecond = 0f,
-      stallMs = 0L,
-    )
-  }
-
-  if (lastRawSampleAtMs == 0L) {
-    return EegStreamSnapshot(
-      status = EegStreamStatus.WAITING_FOR_RAW,
-      ready = false,
-      samplesPerSecond = 0f,
-      stallMs = 0L,
-    )
-  }
-
-  val sampleWindowMs = (nowMs - lastRateTickMs).coerceAtLeast(1L)
-  val provisionalSamplesPerSecond = if (lastRateTickMs == 0L) {
-    0f
-  } else {
-    rawCountThisSecond * 1000f / sampleWindowMs.toFloat()
-  }
-  val effectiveSamplesPerSecond = max(lastMeasuredSamplesPerSecond, provisionalSamplesPerSecond)
-  val stallMs = (nowMs - lastRawSampleAtMs).coerceAtLeast(0L)
-  val status = when {
-    stallMs > EEG_STREAM_STALE_MS -> EegStreamStatus.STALLED
-    firstRawBurstAtMs == 0L || nowMs - firstRawBurstAtMs < EEG_STREAM_CONFIRM_MS -> EegStreamStatus.CONFIRMING
-    effectiveSamplesPerSecond < EEG_STREAM_READY_MIN_SAMPLES_PER_SECOND -> EegStreamStatus.CONFIRMING
-    debugReplayEnabled -> EegStreamStatus.DEBUG_REPLAY
-    else -> EegStreamStatus.LIVE
-  }
-
-  return EegStreamSnapshot(
-    status = status,
-    ready = status == EegStreamStatus.LIVE || status == EegStreamStatus.DEBUG_REPLAY,
-    samplesPerSecond = effectiveSamplesPerSecond,
-    stallMs = stallMs,
-  )
-}
-
 internal fun calibrationEyesClosedCountdownValue(remainingSeconds: Int): Int? {
-  return if (remainingSeconds in 31..40) remainingSeconds - 30 else null
+  // Counts down the last 10 seconds of the eyes-open half.
+  val half = CALIBRATION_SECONDS / 2
+  return if (remainingSeconds in (half + 1)..(half + 10)) remainingSeconds - half else null
 }
 
 internal val METRIC_WINDOW_OPTIONS = listOf(60, 180, 300, 600)
 
-private const val EEG_STREAM_CONFIRM_MS = 600L
-private const val EEG_STREAM_STALE_MS = 900L
-private const val EEG_STREAM_READY_MIN_SAMPLES_PER_SECOND = 96f
 private const val RAW_PREVIEW_REFRESH_MS = 62L
-private const val DEBUG_RAW_LOOP_CHUNK_SAMPLES = 16
-private const val DEBUG_RAW_LOOP_CHUNK_DELAY_MS = 31L
-private val DEBUG_RAW_LOOP_SAMPLE_PERIOD_MS = 1000.0 / DEBUG_RAW_LOOP_SAMPLE_RATE_HZ.toDouble()
+// Enough for a phone-width plot; min/max pairs keep spikes visible after decimation.
+private const val RAW_PREVIEW_MAX_POINTS = 800
+private const val DEBUG_RAW_LOOP_TICK_MS = 20L
 
 private enum class RawSignalSource {
   LIVE,

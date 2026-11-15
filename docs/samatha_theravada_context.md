@@ -21,6 +21,7 @@ The app follows that distinction by:
 - fading reward down when the frontal pattern looks sleepy
 - suppressing reward when the signal looks contaminated
 - keeping the clean meditation baseline separate from the optional eye/jaw/frown artefact capture
+- scoring each session against a baseline recorded with the same eyes setting (closed or open), so the posture of practice is compared like with like
 
 ## Practical caveat
 
@@ -28,7 +29,7 @@ The feedback model is a personalised frontal-state classifier built from one dry
 
 ## Metric language in plain English
 
-- `Meditation Proxy (MP)`: the app's main reward proxy for relaxed, alert, clean settling
+- `Meditation Proxy (MP)`: the app's main reward proxy for relaxed, alert, clean settling; about 50% at your own baseline
 - `Settledness (S)`: calm-but-organized frontal settling
 - `Control (C)`: lower drift toward mind-wandering relative to baseline
 - `Alertness (A)`: inverse of drowsiness evidence

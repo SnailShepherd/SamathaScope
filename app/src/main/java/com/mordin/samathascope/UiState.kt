@@ -28,6 +28,28 @@ enum class EegStreamStatus {
   LIVE,
   DEBUG_REPLAY,
   STALLED,
+  /** Samples arrive, but not at the expected 512 per second. */
+  WRONG_RATE,
+}
+
+enum class ThemeMode(val storageValue: String) {
+  SYSTEM("system"),
+  LIGHT("light"),
+  DARK("dark");
+
+  companion object {
+    fun fromStorage(value: String?): ThemeMode = entries.firstOrNull { it.storageValue == value } ?: SYSTEM
+  }
+}
+
+/** Whether the eyes stay open or closed during the session; picks the matching calibration baseline. */
+enum class SessionMode(val storageValue: String) {
+  EYES_CLOSED("eyes_closed"),
+  EYES_OPEN("eyes_open");
+
+  companion object {
+    fun fromStorage(value: String?): SessionMode = entries.firstOrNull { it.storageValue == value } ?: EYES_CLOSED
+  }
 }
 
 enum class CalibrationPhase {
@@ -75,6 +97,8 @@ data class UiState(
   val bondedDevices: List<BondedDevice> = emptyList(),
   val selectedDeviceMac: String? = null,
   val headsetConnecting: Boolean = false,
+  /** Last connection problem to show under the headset controls, or null. */
+  val connectionError: String? = null,
   val connected: Boolean = false,
   val eegStreamStatus: EegStreamStatus = EegStreamStatus.DISCONNECTED,
   val eegStreamReady: Boolean = false,
@@ -90,8 +114,6 @@ data class UiState(
   val streamStallMs: Long = 0,
   val batteryPercent: Int? = null,
 
-  val rawPreview: List<Int> = emptyList(),
-
   val visibleMetrics: Set<PlotType> = defaultVisibleMetrics(),
   val selectedMetricInfo: PlotType = PlotType.MEDITATION_PROXY,
   val metricPlotSeries: Map<PlotType, List<Float>> = emptyMap(),
@@ -99,8 +121,11 @@ data class UiState(
   val rawPlotOffsetSeconds: Int = 0,
   val metricPlotOffsetSeconds: Int = 0,
 
+  val sessionMode: SessionMode = SessionMode.EYES_CLOSED,
   val sessionRunning: Boolean = false,
   val sessionPaused: Boolean = false,
+  /** True when the session was paused because another app took the audio output. */
+  val pausedByAudioFocus: Boolean = false,
   val calibrating: Boolean = false,
   val calibrationPhase: CalibrationPhase? = null,
   val calibrationInstruction: String = "",
@@ -152,7 +177,15 @@ data class UiState(
   val audioBaseDb: Float = -120f,
 
   val recordingEnabled: Boolean = false,
+  /** True while the running session is being written to disk. */
+  val recordingActive: Boolean = false,
   val lastRecordingPath: String? = null,
+  /** True when at least one recorded session exists on the device to share. */
+  val recordedSessionAvailable: Boolean = false,
+
+  val themeMode: ThemeMode = ThemeMode.SYSTEM,
+  /** Shows the debug raw replay controls. */
+  val developerOptionsEnabled: Boolean = false,
 )
 
 fun defaultVisibleMetrics(): Set<PlotType> = linkedSetOf(
