@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Only the exports folder is shared; recordings themselves stay private. Sessions are stored in
+     external app files when available, otherwise internal files, so both are listed. -->
+<paths>
+  <external-files-path name="exports" path="exports/" />
+  <files-path name="exports_internal" path="exports/" />
+</paths>

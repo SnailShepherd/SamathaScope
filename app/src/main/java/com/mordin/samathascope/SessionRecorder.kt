@@ -2,9 +2,10 @@ package com.mordin.samathascope
 
 import android.content.Context
 import java.io.BufferedOutputStream
+import java.io.BufferedWriter
 import java.io.File
 import java.io.FileOutputStream
-import java.io.PrintWriter
+import java.io.OutputStreamWriter
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -63,7 +64,8 @@ fun recordedFeatureCsvHeader(): String {
     "blink_rate_hz",
     "clip_fraction",
     "line_noise_ratio",
-    "max_gap_ms",
+    "signal_gap_ms",
+    "mains_hz",
     "z_log_beta",
     "z_tbr",
     "z_tar",
@@ -146,7 +148,8 @@ fun RecordedFeatureRow.toCsvRow(): String {
     float(features.blinkRateHz),
     float(features.clipFraction),
     float(features.lineNoiseRatio),
-    features.maxGapMs,
+    features.signalGapMs,
+    features.mainsHz,
     float(zScores.logBeta),
     float(zScores.tbr),
     float(zScores.tar),
@@ -201,24 +204,35 @@ class SessionRecorder(private val ctx: Context) {
     private set
 
   private var rawOut: BufferedOutputStream? = null
-  private var featOut: PrintWriter? = null
+  // A BufferedWriter, not a PrintWriter: PrintWriter swallows IOExceptions, which would hide a full
+  // disk from the caller's failure handling and silently produce a truncated features.csv.
+  private var featOut: BufferedWriter? = null
 
-  /** Opens the session files. Throws if storage is unavailable; callers should treat that as "not recording". */
-  fun start(sampleRateHz: Int) {
+  /**
+   * Opens the session files. Throws if storage is unavailable; callers should treat that as "not
+   * recording". [metadata] is written to meta.txt after the format keys, one `key=value` per line.
+   */
+  fun start(sampleRateHz: Int, metadata: Map<String, String> = emptyMap()) {
     val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-    val root = ctx.getExternalFilesDir(null) ?: ctx.filesDir
-    sessionDir = File(root, "sessions/$ts")
+    sessionDir = File(sessionsRoot(ctx), ts)
     sessionDir.mkdirs()
 
-    File(sessionDir, "meta.txt").writeText(
-      "sampleRateHz=$sampleRateHz\nformat=raw16le\n"
+    File(sessionDir, META_FILE).writeText(
+      formatMetadata(mapOf("sampleRateHz" to "$sampleRateHz", "format" to "raw16le") + metadata)
     )
 
     rawOut = BufferedOutputStream(FileOutputStream(File(sessionDir, "raw.raw16le")))
-    featOut = PrintWriter(File(sessionDir, "features.csv")).apply {
-      println(recordedFeatureCsvHeader())
+    featOut = BufferedWriter(OutputStreamWriter(FileOutputStream(File(sessionDir, "features.csv")), Charsets.UTF_8)).apply {
+      write(recordedFeatureCsvHeader())
+      newLine()
       flush()
     }
+  }
+
+  /** Adds lines to meta.txt, e.g. the baseline once calibration finishes or the end time. */
+  fun appendMeta(metadata: Map<String, String>) {
+    if (metadata.isEmpty()) return
+    File(sessionDir, META_FILE).appendText(formatMetadata(metadata))
   }
 
   fun appendRaw(v: Short) {
@@ -229,7 +243,8 @@ class SessionRecorder(private val ctx: Context) {
 
   fun appendFeatures(row: RecordedFeatureRow) {
     val out = featOut ?: return
-    out.println(row.toCsvRow())
+    out.write(row.toCsvRow())
+    out.newLine()
     out.flush()
   }
 
@@ -240,5 +255,9 @@ class SessionRecorder(private val ctx: Context) {
     try { featOut?.flush() } catch (_: Throwable) {}
     try { featOut?.close() } catch (_: Throwable) {}
     featOut = null
+  }
+
+  private companion object {
+    const val META_FILE = "meta.txt"
   }
 }

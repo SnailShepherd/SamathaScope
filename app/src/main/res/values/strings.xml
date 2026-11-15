@@ -1,11 +1,9 @@
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
   <string name="app_name">SamathaScope</string>
-  <string name="app_title">SamathaScope v0.80</string>
-  <string name="settings">Settings</string>
+  <string name="app_title">SamathaScope v0.81</string>
 
   <string name="tab_dashboard">Dashboard</string>
   <string name="tab_settings">Settings</string>
-  <string name="tab_signals">Signals</string>
   <string name="tab_learn">Learn</string>
 
   <string name="section_headset">Headset</string>
@@ -19,6 +17,7 @@
   <string name="eeg_stream_live">Live raw EEG</string>
   <string name="eeg_stream_debug_replay">Looped debug raw EEG</string>
   <string name="eeg_stream_stalled">Raw EEG stalled</string>
+  <string name="eeg_stream_wrong_rate">Unexpected sample rate</string>
   <string name="headset_status_helper_disconnected">Connect the paired headset, then wait for live raw EEG before starting a session.</string>
   <string name="headset_status_helper_connecting">Trying to connect to the paired headset. Wait for raw EEG before starting a session.</string>
   <string name="headset_status_helper_waiting_for_raw">The Bluetooth link is up, but the app has not received raw EEG yet.</string>
@@ -26,15 +25,14 @@
   <string name="headset_status_helper_live">Raw EEG is flowing. You can start the session now.</string>
   <string name="headset_status_helper_debug_replay_waiting">Preparing the saved 60-second debug loop. The session button unlocks after it starts streaming.</string>
   <string name="headset_status_helper_debug_replay">Using the saved 60-second debug loop instead of the live headset. Disable replay in Settings to reconnect the headset.</string>
+  <string name="headset_status_helper_wrong_rate">Samples are arriving, but not at the expected 512 per second, so the analysis would be wrong. Reconnect the headset; if it persists, check that it is a MindWave Mobile 2.</string>
   <string name="headset_status_helper_stalled">The headset stopped sending raw EEG. Wait for the stream to recover before starting.</string>
   <string name="grant_permissions">Grant permissions</string>
   <string name="refresh_devices">Refresh devices</string>
-  <string name="refresh">Refresh</string>
-  <string name="connecting">Connecting...</string>
+  <string name="connecting">Connecting…</string>
   <string name="connect">Connect</string>
   <string name="disconnect">Disconnect</string>
   <string name="select_device">Select paired device</string>
-  <string name="telemetry_line">Poor signal: %1$d   Samples/s: %2$d   Stall: %3$d ms</string>
   <string name="telemetry_poor_signal">Poor signal</string>
   <string name="telemetry_samples_per_second">Samples/s</string>
   <string name="telemetry_stall_ms">Stream stall</string>
@@ -46,28 +44,26 @@
   <string name="stop_session">Stop</string>
   <string name="session_start_blocked_connecting">The app is still connecting to the headset.</string>
   <string name="session_start_blocked_disconnected">Connect the headset first.</string>
+  <string name="session_start_blocked_wrong_rate">The headset is not sending 512 samples per second, so a session cannot start. See the Headset card.</string>
   <string name="session_start_blocked_waiting_for_stream">Wait for live raw EEG before starting the session.</string>
   <string name="session_start_ready">Live raw EEG detected. You can start the session.</string>
   <string name="session_start_blocked_debug_replay_waiting">Preparing the saved debug raw EEG loop.</string>
   <string name="session_start_ready_debug_replay">Saved debug raw EEG is looping. You can start the session without the headset.</string>
   <string name="calibrating_countdown">Calibrating: %1$ds</string>
-  <string name="calibration_hint">Sit still, stay awake, and relax your face while calibration completes.</string>
   <string name="calibration_phase_eyes_open">Sit still with your eyes open.</string>
-  <string name="calibration_phase_eyes_open_countdown">Relax your face and close your eyes in %1$d...</string>
+  <string name="calibration_phase_eyes_open_countdown">Relax your face and close your eyes in %1$d…</string>
   <string name="calibration_phase_eyes_closed">Relax your face and close your eyes.</string>
   <string name="calibration_phase_eyes_closed_now">Relax your face and close your eyes now.</string>
   <string name="calibration_phase_complete">Baseline calibration complete.</string>
-  <string name="calibration_provisional_baseline">Calibration was skipped before enough data was collected. Scores stay neutral until about 20 seconds of clean signal have built a baseline.</string>
+  <string name="calibration_provisional_baseline">Calibration ended before its eyes-open or eyes-closed half (whichever matches this session) collected enough data. Scores stay neutral until about 20 seconds of clean signal have built a baseline.</string>
   <string name="skip_calibration">Skip calibration</string>
-  <string name="calibration_skip_helper">For faster smoke testing you can skip the countdown and use the best baseline available so far.</string>
+  <string name="calibration_skip_helper">For faster smoke testing you can skip the countdown and use the baseline from the half that matches the session, if it already has about 20 seconds of data.</string>
   <string name="session_elapsed_label">Elapsed</string>
   <string name="session_state_label">Displayed state</string>
   <string name="session_avg_proxy_label">Average Meditation Proxy</string>
   <string name="session_over_80_label">Meditation Proxy ≥ 80%%</string>
-  <string name="idle_status">Idle</string>
 
   <string name="section_raw_eeg">Raw EEG</string>
-  <string name="raw_range_label">Window: %1$ds   Y range: %2$d to %3$d (raw units)</string>
 
   <string name="section_live_plot">Metric explorer</string>
   <string name="metric_explorer_hint">Tap chips to show or hide lines. Hold a chip to focus its explanation below.</string>
@@ -84,14 +80,9 @@
   <string name="reliability_message_low">Recent input quality is weak, so state interpretation may be unstable.</string>
   <string name="reliability_message_medium">Input quality is usable but mixed; treat short-term swings with caution.</string>
   <string name="reliability_message_high">Input quality is strong enough for educational interpretation and audio feedback.</string>
-  <string name="metric_settledness">Settledness</string>
-  <string name="metric_control">Control</string>
-  <string name="metric_alertness">Alertness</string>
-  <string name="metric_drowsy_score">Drowsy score</string>
-  <string name="metric_quality_confidence">Quality confidence</string>
   <string name="drowsy_contributors_title">Drowsiness evidence terms</string>
   <string name="diagnostic_contact">Contact quality</string>
-  <string name="diagnostic_line">Line noise (50 Hz, diagnostics only)</string>
+  <string name="diagnostic_line">Line noise (50/60 Hz, diagnostics only)</string>
   <string name="diagnostic_emg">EMG proxy</string>
   <string name="diagnostic_blink">Blinks and transients</string>
   <string name="diagnostic_clip">Clipping</string>
@@ -101,6 +92,10 @@
   <string name="personalized_emg_label">Personalised EMG reference</string>
   <string name="esense_line">eSense Attention: %1$d   eSense Meditation: %2$d</string>
 
+  <string name="session_mode_label">Eyes during the session</string>
+  <string name="session_mode_eyes_closed">Eyes closed</string>
+  <string name="session_mode_eyes_open">Eyes open</string>
+  <string name="session_mode_helper">Calibration records both; the session is scored against the matching half.</string>
   <string name="section_feedback_source">Session feedback source</string>
 
   <string name="settings_audio_title">Audio</string>
@@ -112,46 +107,23 @@
   <string name="noise_color_brown">Brown</string>
   <string name="noise_color_blue">Blue</string>
   <string name="gamma_value">Sensitivity (gamma): %1$.2f</string>
-  <string name="gamma_helper">Gamma controls response curve sensitivity: higher gamma is gentler near good states and more pronounced near poor states.</string>
   <string name="base_noise_range">Base noise range (dB): min %1$d  max %2$d</string>
   <string name="base_noise_min">Minimum (quiet)</string>
   <string name="base_noise_max">Maximum (loud)</string>
   <string name="test_beep">Test beep</string>
-  <string name="audio_running">Audio running</string>
-  <string name="audio_off">Audio off</string>
-  <string name="audio_muted">Muted</string>
-  <string name="audio_on">Audio on</string>
-  <string name="audio_db">%1$d dB</string>
 
-  <string name="plot_raw">Raw EEG</string>
-  <string name="plot_meditation_proxy">Meditation Proxy</string>
-  <string name="plot_settledness">Settledness</string>
-  <string name="plot_control">Control</string>
-  <string name="plot_alertness">Alertness</string>
-  <string name="plot_drowsy_score">Drowsy Score</string>
-  <string name="plot_artefact_score">Artefact Score</string>
-  <string name="plot_quality_confidence">Quality Confidence</string>
-  <string name="plot_effortful_focus">Effortful Focus</string>
-  <string name="plot_mind_wandering">Mind Wandering</string>
-  <string name="plot_esense_meditation">eSense Meditation</string>
-  <string name="plot_esense_attention">eSense Attention</string>
 
-  <string name="plot_settings_title">Plot settings</string>
   <string name="settings_plot_title">Plots</string>
   <string name="settings_plot_helper">The dashboard metric explorer uses one shared history window. Raw EEG stays visible above it, and paused or stopped plots can be dragged to older history.</string>
   <string name="plot_window_label">Window</string>
   <string name="seconds_value">%1$ds</string>
-  <string name="plot_y_range">Y range: %1$d to %2$d</string>
-  <string name="plot_y_min">Y minimum</string>
-  <string name="plot_y_max">Y maximum</string>
-  <string name="reset_plot_settings">Reset plot settings</string>
   <string name="battery_label">Battery</string>
 
   <string name="settings_data_title">Data and filters</string>
   <string name="record_local">Record raw data and feature values locally</string>
   <string name="saved_under">Saved under: %1$s</string>
-  <string name="notch_50_enabled">Enable optional 50 Hz notch</string>
-  <string name="notch_50_helper">Use only if mains contamination is still obvious. The main classifier already limits most analysis to 1-35 Hz.</string>
+  <string name="notch_50_enabled">Enable optional mains notch (50/60 Hz, auto-detected)</string>
+  <string name="notch_50_helper">Removes mains hum from the signal before blink detection and spectral analysis. The app detects whether your mains is 50 or 60 Hz from the signal. Turn it on if line noise in Diagnostics stays high. Line-noise and clipping checks always use the unfiltered signal.</string>
   <string name="debug_raw_replay_title">Debug raw replay</string>
   <string name="debug_raw_replay_helper">Capture 60 seconds of live raw EEG once, then loop it as the source signal for smoke tests and debugging.</string>
   <string name="debug_raw_replay_capture">Capture 60s from live raw EEG</string>
@@ -164,7 +136,6 @@
   <string name="debug_raw_replay_status_active">Saved debug loop is currently feeding the app.</string>
   <string name="debug_raw_replay_storage_hint">Captured loops are mirrored under Android/data/com.mordin.samathascope/files/debug/ and bundled in this repo for fresh debug installs.</string>
   <string name="debug_raw_replay_active">Debug replay active</string>
-  <string name="close">Close</string>
 
   <string name="artifact_calibration_title">Optional artefact calibration</string>
   <string name="artifact_calibration_prompt">Capture a few eye and face movement examples to personalise blink and muscle artefact thresholds. These examples do not affect your clean meditation baseline.</string>
@@ -182,17 +153,15 @@
   <string name="learn_samatha_title">Samatha and relaxed alertness</string>
   <string name="learn_samatha_body">Samatha in practice points toward calm collectedness. This app tries to reward relaxed alertness rather than quiet drowsiness, so the feedback signal fades down when the frontal pattern looks sleepy or contaminated.</string>
   <string name="learn_calibration_title">How calibration works</string>
-  <string name="learn_calibration_body">The clean baseline calibration lasts 60 seconds. For the first 30 seconds you sit still with your eyes open; for the second 30 seconds you relax your face and close your eyes. These clean windows set your personal median and MAD baselines for the classifier.</string>
+  <string name="learn_calibration_body">The clean baseline calibration lasts 60 seconds. For the first 30 seconds you sit still with your eyes open; for the second 30 seconds you relax your face and close your eyes. Each half sets its own personal median and MAD baselines, and a session is scored against the half that matches its eyes setting (closed or open). During the session the baseline adapts slowly, over a 30-minute window blended with the calibration, so it follows electrode drift without erasing a sustained good state.</string>
   <string name="learn_artifact_calibration_title">Optional artefact calibration</string>
   <string name="learn_artifact_calibration_body">After the clean baseline, you can run a short 25-second artefact capture. It records eye movements, jaw clench, and forehead tension so blink and EMG thresholds can be personalised without contaminating the clean meditation baseline.</string>
   <string name="learn_score_title">Frontal-state feedback proxy</string>
-  <string name="learn_score_body">The live reward is a personalised frontal-state classifier built from 8-second raw EEG windows. Dashboard audio uses the source chosen in the Session card.</string>
+  <string name="learn_score_body">The live reward is a personalised frontal-state classifier built from 5-second raw EEG windows, updated every second. Dashboard audio uses the source chosen in the Session card.</string>
   <string name="learn_metric_difference_title">Settled is not drowsy</string>
   <string name="learn_metric_difference_body">Drowsiness is estimated first so the app does not confuse sleepy theta-heavy slowing with useful meditation feedback. Its evidence combines TAR, TBR, entropy, and ABR, so a settled state here means relaxed and awake, not merely low-energy.</string>
   <string name="learn_caveat_title">Interpretation limits</string>
   <string name="learn_caveat_body">This is a non-medical training aid built around one dry frontal electrode at FP1 with an ear reference. It cannot infer whole-brain state, connectivity, source localisation, or meditative attainment.</string>
-  <string name="learn_wellbeing_title">Wellbeing note</string>
-  <string name="learn_wellbeing_body">If you feel discomfort, fatigue, or stress during sessions, pause and recover before continuing. Quietness alone is not the goal; stable, alert practice is.</string>
   <string name="learn_mode_title">Learn focus</string>
   <string name="learn_mode_metrics">How metrics work</string>
   <string name="learn_mode_foundations">Foundations</string>
@@ -201,7 +170,7 @@
   <string name="learn_select_metric_title">Choose a metric</string>
   <string name="learn_metric_details_title">%1$s (%2$s)</string>
   <string name="learn_eeg_assumptions_title">EEG model assumptions</string>
-  <string name="learn_eeg_assumptions_body">All computed metrics share a common set of constraints: one dry frontal electrode (FP1), an ear reference, 512 Hz sampling through the MindWave Mobile 2 headset, 8-second analysis windows, and a personal calibration session conducted under the same conditions. Departing from any of these conditions reduces the reliability of all derived metrics equally.</string>
+  <string name="learn_eeg_assumptions_body" tools:ignore="Typos">All computed metrics share a common set of constraints: one dry frontal electrode (FP1), an ear reference, 512 Hz sampling through the MindWave Mobile 2 headset, 5-second analysis windows, and a personal calibration session conducted under the same conditions. Departing from any of these conditions reduces the reliability of all derived metrics equally.</string>
   <string name="learn_interpretive_note_title">Interpretation limits</string>
   <string name="learn_sources_title">Sources</string>
   <string name="learn_sources_intro">The app includes short offline summaries and optional links for deeper reading.</string>
@@ -215,4 +184,123 @@
   <string name="state_effortful_focus">Effortful focus</string>
   <string name="state_mind_wandering">Mind wandering</string>
   <string name="state_uncertain">Uncertain</string>
+
+  <string name="bt_error_unavailable">This device has no Bluetooth.</string>
+  <string name="bt_error_off">Bluetooth is off. Turn it on, then tap Refresh devices or Connect.</string>
+  <string name="bt_error_invalid_address">The selected device has an invalid Bluetooth address. Pick it again from the list.</string>
+  <string name="bt_error_connect_failed">Could not connect to the headset. Check that it is switched on, paired and nearby, then try again.</string>
+  <string name="bt_error_connection_lost">The headset connection was lost. Any running session was stopped.</string>
+
+  <string name="session_paused_audio_focus">Paused because another app started playing audio. Tap Resume when you are ready.</string>
+
+  <string name="settings_appearance_title">Appearance</string>
+  <string name="theme_system">System</string>
+  <string name="theme_light">Light</string>
+  <string name="theme_dark">Dark</string>
+
+  <string name="share_last_session">Share last session</string>
+  <string name="share_last_session_helper">Zips the most recent recording (raw signal, features and metadata) and opens the share sheet.</string>
+  <string name="share_unavailable_recording">Available after the current recording stops.</string>
+  <string name="share_none">No recorded sessions yet. Turn on local recording, then run a session.</string>
+  <string name="share_failed">Could not prepare the recording for sharing.</string>
+  <string name="share_chooser_title">Share SamathaScope session</string>
+
+  <string name="session_notification_channel">Meditation session</string>
+  <string name="session_notification_title">Session running</string>
+  <string name="session_notification_text">SamathaScope keeps reading the headset and playing feedback while the screen is off.</string>
+
+  <!-- Metric glossary (MetricGlossary.kt). Formulas are notation and are not translated. -->
+  <string name="glossary_meditation_proxy_plain_name">Meditation Proxy</string>
+  <string name="glossary_meditation_proxy_short_meaning">A practical reward proxy for relaxed, alert, clean settling.</string>
+  <string name="glossary_meditation_proxy_drivers">It rises when settledness, alertness, and usable signal quality all stay strong together.</string>
+  <string name="glossary_meditation_proxy_long_meaning">This is the main dashboard reward. It is intentionally conservative: contamination and sleepy slowing fade it down so the app does not reward quiet but unusable or drowsy windows. Settledness and alertness are combined as a geometric mean, so at your baseline it reads about 50% (less any quality penalty) and a high reading needs both to be high together.</string>
+  <string name="glossary_meditation_proxy_display_formula" translatable="false">MP = √(Settledness × Alertness) × Quality Confidence</string>
+  <string name="glossary_meditation_proxy_interpretive_note">This is a reward heuristic for audio feedback and session trends, not a clinical meditation score. Individual calibration quality affects the reading.</string>
+  <string name="glossary_settledness_plain_name">Settledness</string>
+  <string name="glossary_settledness_short_meaning">How much the current frontal pattern looks calm but still organized.</string>
+  <string name="glossary_settledness_drivers">It rises when alpha-over-beta balance looks more settled without a strong theta-heavy pull toward drowsiness.</string>
+  <string name="glossary_settledness_long_meaning">Settledness tries to represent relaxed but awake settling. It is not simple slowing, and it is not meant to reward a dull or sleepy state.</string>
+  <string name="glossary_settledness_display_formula" translatable="false">S = sigmoid(z(α/β) − 0.5 × z(θ/α))</string>
+  <string name="glossary_settledness_interpretive_note">Frontal α/β balance is highly state- and person-specific. The score is z-scored against your own session baseline, so its first few minutes are less stable.</string>
+  <string name="glossary_settledness_term_1">Alpha-over-beta ratio. Higher values often look calmer, as long as they are not paired with sleepy slowing.</string>
+  <string name="glossary_settledness_term_2">Theta-over-alpha ratio. Higher values can point toward drowsier slowing, so settledness subtracts some of it.</string>
+  <string name="glossary_control_plain_name">Control</string>
+  <string name="glossary_control_short_meaning">A proxy for stable regulation versus drifting.</string>
+  <string name="glossary_control_drivers">It rises when theta-to-beta balance stays lower than the user\'s baseline.</string>
+  <string name="glossary_control_long_meaning">Control is a compact frontal control proxy. Read it as more or less stable regulation, not as a literal measure of willpower or intelligence.</string>
+  <string name="glossary_control_display_formula" translatable="false">C = sigmoid(−z(θ/β))</string>
+  <string name="glossary_control_interpretive_note">θ/β regulation patterns overlap with task-demands and mental effort. High control during meditation may reflect active steering more than effortless stability.</string>
+  <string name="glossary_control_term_1">Theta-over-beta ratio. Higher values often look more drifty; lower values tend to look more controlled.</string>
+  <string name="glossary_alertness_plain_name">Alertness</string>
+  <string name="glossary_alertness_short_meaning">The inverse of the drowsiness model.</string>
+  <string name="glossary_alertness_drivers">It falls when theta-heavy slowing rises while entropy and alpha-over-beta balance move in a drowsy direction.</string>
+  <string name="glossary_alertness_long_meaning">Alertness is a practical wakefulness proxy for this device and montage. It is not a clinical vigilance score, but it is useful as a session feedback source because it cleanly separates awake from sleepy quietness.</string>
+  <string name="glossary_alertness_display_formula" translatable="false">A = 1 − Drowsiness</string>
+  <string name="glossary_alertness_interpretive_note">Alertness inherits all limits of the drowsiness model. It is not a clinical vigilance measure and can fluctuate with eyes-closed relaxation even when the user is awake.</string>
+  <string name="glossary_drowsy_score_plain_name">Drowsiness</string>
+  <string name="glossary_drowsy_score_short_meaning">Frontal slowing evidence that tries to separate sleepy quietness from useful settling.</string>
+  <string name="glossary_drowsy_score_drivers">It rises with higher TAR, higher TBR, lower entropy, and lower ABR. Brief spikes can still happen with eyes-closed slowing or very low-complexity windows.</string>
+  <string name="glossary_drowsy_score_long_meaning">This is not a sleep-stage detector. On a single dry FP1 electrode it should be read as drowsy-like evidence, not proof that the user is falling asleep.</string>
+  <string name="glossary_drowsy_score_display_formula" translatable="false">D = sigmoid(1.3 × z(θ/α) + 0.9 × z(θ/β) − 0.7 × z(H) − 0.4 × z(α/β))</string>
+  <string name="glossary_drowsy_score_interpretive_note">Drowsy and relaxed patterns are hard to separate at single-electrode FP1 resolution. Brief elevated readings can happen during deep relaxation, not only during drowsiness.</string>
+  <string name="glossary_drowsy_score_term_1">Theta-over-alpha ratio. When this rises, the window looks more slowed and sleepy.</string>
+  <string name="glossary_drowsy_score_term_2">Theta-over-beta ratio. Higher values can indicate reduced control and more drowsy-like drift.</string>
+  <string name="glossary_drowsy_score_term_3">Spectral entropy over 4–30 Hz. Lower entropy means the spectrum is simpler and more repetitive, which often happens in sleepy slowing.</string>
+  <string name="glossary_drowsy_score_term_4">Alpha-over-beta ratio. Higher values can support settledness; lower values in this model count toward drowsiness.</string>
+  <string name="glossary_artefact_score_plain_name">Artefact Score</string>
+  <string name="glossary_artefact_score_short_meaning">How contaminated the current signal looks.</string>
+  <string name="glossary_artefact_score_drivers">It rises with poor contact, blink or transient activity, muscle-like high-frequency activity, clipping, and signal gaps (lost samples).</string>
+  <string name="glossary_artefact_score_long_meaning">This is the main contamination gate. High artefact means the app should stop trusting the state estimate and reduce reward, even if the waveform also looks quiet.</string>
+  <string name="glossary_artefact_score_display_formula" translatable="false">AS = 0.30 × contact + 0.10 × line + 0.25 × EMG + 0.16 × blink + 0.12 × clip + 0.10 × stall</string>
+  <string name="glossary_artefact_score_interpretive_note">Sitting very still and ensuring good headset contact reduces this significantly. Jaw clenching, forehead tension, and loose electrodes are the most common sources.</string>
+  <string name="glossary_quality_confidence_plain_name">Quality Confidence</string>
+  <string name="glossary_quality_confidence_short_meaning">How much the app trusts the current window as usable input.</string>
+  <string name="glossary_quality_confidence_drivers">It rises when artefact score is low.</string>
+  <string name="glossary_quality_confidence_long_meaning">Quality confidence is the clean-signal complement of artefact score. It does not mean the classification is perfect; it means the window is usable enough to trust more.</string>
+  <string name="glossary_quality_confidence_display_formula" translatable="false">QC = 1 − Artefact Score</string>
+  <string name="glossary_quality_confidence_interpretive_note">High quality confidence means the window passed artefact screening, not that the classification is correct. Correct classification additionally requires a well-established personal baseline.</string>
+  <string name="glossary_effortful_focus_score_plain_name">Effortful Focus</string>
+  <string name="glossary_effortful_focus_score_short_meaning">A proxy for active re-focusing or deliberate correction.</string>
+  <string name="glossary_effortful_focus_score_drivers">It rises when beta-related control looks stronger while settled alpha-over-beta balance is not dominant.</string>
+  <string name="glossary_effortful_focus_score_long_meaning">Effortful focus is not automatically better meditation. It often reflects steering, correction, or task-like control, so it is shown for reference and is not offered as a feedback source.</string>
+  <string name="glossary_effortful_focus_score_display_formula" translatable="false">F = sigmoid(−0.9 × z(α/β) − 0.7 × z(θ/β) + 0.4 × z(log β) − 0.2 × z(H))</string>
+  <string name="glossary_effortful_focus_score_interpretive_note">Effortful focus during meditation is not automatically better practice. It is shown for reference only and is not offered as a feedback source.</string>
+  <string name="glossary_mind_wandering_score_plain_name">Mind Wandering</string>
+  <string name="glossary_mind_wandering_score_short_meaning">A proxy for awake drift, reduced regulation, or loosening attention.</string>
+  <string name="glossary_mind_wandering_score_drivers">It rises when theta-over-beta increases without the more settled alpha-over-beta pattern, especially when entropy does not support a clean stable state.</string>
+  <string name="glossary_mind_wandering_score_long_meaning">This is a lightweight awake-drift proxy for live feedback, not a thought-content detector. It is most useful as a disorganization axis: more wandering usually means more drift and less continuity.</string>
+  <string name="glossary_mind_wandering_score_display_formula" translatable="false">W = sigmoid(0.9 × z(θ/β) − 0.4 × z(α/β) − 0.2 × z(H))</string>
+  <string name="glossary_mind_wandering_score_interpretive_note">Awake drifting is not reliably separable from settled contemplation at single-electrode FP1. Use this as a loose disorganisation proxy, not as a definitive thought-content indicator.</string>
+  <string name="glossary_mind_wandering_score_term_1">Theta-over-beta ratio. Higher values often look more drifty or less controlled.</string>
+  <string name="glossary_mind_wandering_score_term_2">Alpha-over-beta ratio. Stronger settled alpha-over-beta balance pushes mind-wandering evidence back down.</string>
+  <string name="glossary_mind_wandering_score_term_3">Spectral entropy. In this score it helps distinguish awake, varied activity from simplistic sleepy slowing.</string>
+  <string name="glossary_esense_meditation_plain_name">eSense Meditation</string>
+  <string name="glossary_esense_meditation_short_meaning">Vendor telemetry shown for comparison only.</string>
+  <string name="glossary_esense_meditation_drivers">This value comes from NeuroSky\'s proprietary eSense pipeline, not the app\'s classifier.</string>
+  <string name="glossary_esense_meditation_long_meaning">The app keeps this visible as telemetry but does not use it as ground truth or as the recommended feedback source.</string>
+  <string name="glossary_esense_meditation_display_formula">Provided by ThinkGear / NeuroSky</string>
+  <string name="glossary_esense_meditation_interpretive_note">Vendor eSense values use a proprietary algorithm; methodology is not disclosed. Treat as supplementary context, not as a comparable alternative.</string>
+  <string name="glossary_esense_attention_plain_name">eSense Attention</string>
+  <string name="glossary_esense_attention_short_meaning">Vendor telemetry shown for comparison only.</string>
+  <string name="glossary_esense_attention_drivers">This value comes from NeuroSky\'s proprietary eSense pipeline, not the app\'s classifier.</string>
+  <string name="glossary_esense_attention_long_meaning">The app keeps this visible as telemetry but does not use it as ground truth or as the recommended feedback source.</string>
+  <string name="glossary_esense_attention_display_formula">Provided by ThinkGear / NeuroSky</string>
+  <string name="glossary_esense_attention_interpretive_note">Vendor eSense values use a proprietary algorithm; methodology is not disclosed. Treat as supplementary context, not as a comparable alternative.</string>
+  <string name="glossary_raw_plain_name">Raw EEG</string>
+  <string name="glossary_raw_short_meaning">The incoming unscored EEG waveform.</string>
+  <string name="glossary_raw_drivers">This shows the live signal before the classifier reduces it to summary features.</string>
+  <string name="glossary_raw_long_meaning">Raw EEG is useful for visually spotting clipping, stalls, movement, or unstable contact. It is not normalized and is not used as a feedback source.</string>
+  <string name="glossary_raw_display_formula">Live FP1 raw stream at 512 Hz</string>
+  <string name="glossary_raw_interpretive_note">Raw EEG at FP1 combines frontal neural activity with muscle, eye, and contact artefacts. Visual inspection helps confirm signal quality before trusting derived metrics.</string>
+
+  <string name="plot_latest">Latest</string>
+  <string name="metric_drivers_line">What usually raises it: %1$s</string>
+  <string name="drowsy_term_tar">Theta/Alpha ratio (TAR)</string>
+  <string name="drowsy_term_tbr">Theta/Beta ratio (TBR)</string>
+  <string name="drowsy_term_entropy">Spectral entropy</string>
+  <string name="drowsy_term_abr">Alpha/Beta ratio (ABR)</string>
+
+  <string name="developer_options_title">Developer</string>
+  <string name="developer_options_enabled">Show developer options</string>
+  <string name="developer_options_helper">Adds debug raw replay: capture 60 seconds of headset signal and loop it to test the app without wearing the headset.</string>
 </resources>

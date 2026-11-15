@@ -65,6 +65,19 @@ class ScoreModelTest {
     assertThat(settled.meditationProxy).isGreaterThan(drowsy.meditationProxy)
   }
 
+  @Test
+  fun meditationProxy_readsAboutHalfAtBaseline() {
+    val scorer = ScoreModel()
+    scorer.setCalibration(calibration())
+
+    // Every feature at its baseline median: settledness and alertness are both 0.5.
+    val output = scorer.classify(poorSignal = 0, features = feature(abr = 0f, spectralEntropy = 0.5f, emg = -1f))
+
+    assertThat(output.settledness).isWithin(0.01f).of(0.5f)
+    assertThat(output.alertness).isWithin(0.01f).of(0.5f)
+    assertThat(output.meditationProxy).isWithin(0.01f).of(0.5f * output.qualityConfidence)
+  }
+
   private fun calibration(): Calibration {
     return Calibration(
       logBeta = RobustBaselineStat(median = 0f, mad = 0.1f, floor = 0.1f),
@@ -89,7 +102,7 @@ class ScoreModelTest {
   ): EegFeatures {
     return EegFeatures(
       windowStartMs = 0L,
-      windowEndMs = 8_000L,
+      windowEndMs = 5_000L,
       pTheta = 1.5f,
       pAlpha = 2.0f,
       pBeta = 1.2f,
@@ -115,7 +128,7 @@ class ScoreModelTest {
       blinkRateHz = blinkRateHz,
       clipFraction = clipFraction,
       lineNoiseRatio = lineNoiseRatio,
-      maxGapMs = 20L,
+      signalGapMs = 20L,
     )
   }
 }

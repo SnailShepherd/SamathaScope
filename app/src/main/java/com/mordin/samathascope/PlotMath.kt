@@ -1,9 +1,24 @@
-﻿package com.mordin.samathascope
+package com.mordin.samathascope
 
 data class PlotPoint(
   val x: Float,
   val y: Float,
 )
+
+/**
+ * Turns horizontal drag distance into whole pan steps (seconds), keeping the sub-step remainder so
+ * slow drags still pan and fast drags pan proportionally.
+ */
+class DragPanAccumulator(private val pixelsPerStep: Float = 18f) {
+  private var carry = 0f
+
+  fun add(dragPx: Float): Int {
+    carry += dragPx
+    val steps = (carry / pixelsPerStep).toInt()
+    carry -= steps * pixelsPerStep
+    return steps
+  }
+}
 
 object PlotMath {
   fun <T> takeFixedWindow(values: List<T>, maxPoints: Int): List<T> {
@@ -35,6 +50,29 @@ object PlotMath {
       val y = height - ((clamped - yMin) / (safeMax - yMin)) * height
       PlotPoint(x = x, y = y)
     }
+  }
+
+  /**
+   * Shrinks [values] to at most [maxPoints] for drawing. Each bucket contributes its minimum and
+   * maximum, in the order they occur, so spikes such as blinks survive decimation.
+   */
+  fun minMaxDecimate(values: IntArray, maxPoints: Int): IntArray {
+    if (values.size <= maxPoints || maxPoints < 2) return values
+    val buckets = maxPoints / 2
+    val out = IntArray(buckets * 2)
+    for (b in 0 until buckets) {
+      val start = (b.toLong() * values.size / buckets).toInt()
+      val end = ((b + 1).toLong() * values.size / buckets).toInt()
+      var minIndex = start
+      var maxIndex = start
+      for (i in start until end) {
+        if (values[i] < values[minIndex]) minIndex = i
+        if (values[i] > values[maxIndex]) maxIndex = i
+      }
+      out[b * 2] = values[minOf(minIndex, maxIndex)]
+      out[b * 2 + 1] = values[maxOf(minIndex, maxIndex)]
+    }
+    return out
   }
 
   fun defaultRawRange(): Pair<Float, Float> = -1200f to 1200f

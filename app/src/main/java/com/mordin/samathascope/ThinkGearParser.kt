@@ -33,6 +33,12 @@ class ThinkGearParser {
   private var payload = ByteArray(169)
   private var payloadPos = 0
 
+  // Loss tracking. A healthy stream is back-to-back packets, so once we have seen one valid packet,
+  // any byte skipped while hunting for sync, or a failed checksum, means data was dropped or corrupted.
+  // Raw-sample packets dominate the stream (8 bytes each), so skipped bytes / 8 estimates lost samples.
+  private var synced = false
+  private var skippedBytes = 0
+
   fun feed(bytes: ByteArray, length: Int) {
     for (i in 0 until length) {
       val b = bytes[i].toInt() and 0xFF
@@ -40,25 +46,45 @@ class ThinkGearParser {
     }
   }
 
+  private fun skip(count: Int) {
+    if (synced) skippedBytes += count
+  }
+
+  private fun reportSkippedBytes() {
+    if (skippedBytes == 0) return
+    val lost = (skippedBytes + RAW_PACKET_BYTES - 1) / RAW_PACKET_BYTES
+    skippedBytes = 0
+    onData?.invoke(ThinkGearData.PacketLoss(lost))
+  }
+
   private fun step(b: Int) {
     when (state) {
       State.SYNC1 -> {
-        if (b == 0xAA) state = State.SYNC2
+        if (b == 0xAA) state = State.SYNC2 else skip(1)
       }
       State.SYNC2 -> {
-        state = if (b == 0xAA) State.PLEN else State.SYNC1
+        if (b == 0xAA) {
+          state = State.PLEN
+        } else {
+          skip(2)
+          state = State.SYNC1
+        }
       }
       State.PLEN -> {
         when {
           // Per the ThinkGear spec, a PLENGTH of 0xAA is just another SYNC byte: stay in sync.
           b == 0xAA -> state = State.PLEN
           b in 0..169 -> {
+            reportSkippedBytes()
             payloadLen = b
             payloadPos = 0
             // An empty payload goes straight to the checksum byte.
             state = if (b == 0) State.CHK else State.PAYLOAD
           }
-          else -> state = State.SYNC1
+          else -> {
+            skip(3)
+            state = State.SYNC1
+          }
         }
       }
       State.PAYLOAD -> {
@@ -72,11 +98,33 @@ class ThinkGearParser {
         sum = sum and 0xFF
         val expected = (255 - sum) and 0xFF
         if (chk == expected) {
+          synced = true
           parsePayload(payload, payloadLen)
+        } else if (synced) {
+          val lost = lostSamplesForCorruptPacket(payloadLen)
+          if (lost > 0) onData?.invoke(ThinkGearData.PacketLoss(lost))
         }
         state = State.SYNC1
       }
     }
+  }
+
+  /**
+   * Raw samples lost with a packet that failed its checksum. A corrupt packet of the once-per-second
+   * eSense/band-power size loses no raw samples. Any other length means the bytes consumed were most
+   * likely raw-sample packets: either a corrupt raw packet, or a corrupted length byte that made the
+   * parser swallow several packets as one payload.
+   */
+  private fun lostSamplesForCorruptPacket(payloadLen: Int): Int {
+    if (payloadLen == ESENSE_PAYLOAD_BYTES) return 0
+    val consumedBytes = payloadLen + PACKET_OVERHEAD_BYTES
+    return (consumedBytes + RAW_PACKET_BYTES - 1) / RAW_PACKET_BYTES
+  }
+
+  private companion object {
+    const val RAW_PACKET_BYTES = 8 // 2 sync + PLEN + 4 payload + checksum.
+    const val PACKET_OVERHEAD_BYTES = 4 // 2 sync + PLEN + checksum.
+    const val ESENSE_PAYLOAD_BYTES = 32 // Poor signal, ASIC band powers, attention, meditation.
   }
 
   private fun parsePayload(buf: ByteArray, len: Int) {

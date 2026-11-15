@@ -94,7 +94,7 @@ class SessionRecorderCsvTest {
       blinkRateHz = 0.1f,
       clipFraction = 0f,
       lineNoiseRatio = 0.02f,
-      maxGapMs = 20L,
+      signalGapMs = 20L,
     )
   }
 
@@ -112,7 +112,7 @@ class SessionRecorderCsvTest {
       hfRatio = 0.1f,
       blinkRateHz = 0.1f,
       clipFraction = 0f,
-      maxGapMs = 20L,
+      signalGapMs = 20L,
       isContaminated = false,
       isCalibrationClean = true,
     )

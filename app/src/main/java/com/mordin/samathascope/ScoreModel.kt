@@ -1,6 +1,7 @@
 package com.mordin.samathascope
 
 import kotlin.math.exp
+import kotlin.math.sqrt
 
 enum class StateLabel {
   SIGNAL_CONTAMINATED,
@@ -24,7 +25,7 @@ data class QualityMetrics(
   val hfRatio: Float,
   val blinkRateHz: Float,
   val clipFraction: Float,
-  val maxGapMs: Long,
+  val signalGapMs: Long,
   val isContaminated: Boolean,
   val isCalibrationClean: Boolean,
 )
@@ -121,7 +122,7 @@ class ScoreModel {
     val emg = clamp01((features.hfRatio - 0.10f) / personalizedEmgSpan)
     val blink = clamp01(features.blinkRateHz / personalizedBlinkUpper)
     val clip = clamp01(features.clipFraction / 0.01f)
-    val stall = clamp01(features.maxGapMs / 500f)
+    val stall = clamp01(features.signalGapMs / 500f)
     val artefactScore = clamp01(
       (0.30f * contact) +
         (0.10f * line) +
@@ -132,7 +133,7 @@ class ScoreModel {
     )
     val isContaminated = poorSignal > 25 ||
       features.clipFraction >= 0.01f ||
-      features.maxGapMs >= 150L ||
+      features.signalGapMs >= 150L ||
       features.blinkRateHz >= 0.75f ||
       features.hfRatio >= 0.35f ||
       artefactScore > 0.45f
@@ -141,7 +142,7 @@ class ScoreModel {
       features.hfRatio < 0.25f &&
       features.blinkRateHz < 0.30f &&
       features.clipFraction < 0.005f &&
-      features.maxGapMs < 100L &&
+      features.signalGapMs < 100L &&
       artefactScore <= 0.30f
 
     return QualityMetrics(
@@ -157,7 +158,7 @@ class ScoreModel {
       hfRatio = features.hfRatio,
       blinkRateHz = features.blinkRateHz,
       clipFraction = features.clipFraction,
-      maxGapMs = features.maxGapMs,
+      signalGapMs = features.signalGapMs,
       isContaminated = isContaminated,
       isCalibrationClean = isCalibrationClean,
     )
@@ -203,7 +204,9 @@ class ScoreModel {
     val control = sigmoid(-z.tbr)
     // Settledness aims for relaxed-but-awake balance rather than theta-heavy drowsiness.
     val settledness = sigmoid(z.abr - (0.5f * z.tar))
-    val meditationProxy = clamp01(settledness * alertness * quality.qualityConfidence)
+    // Geometric mean, so a neutral baseline (both factors at 0.5) reads 50% before quality weighting,
+    // and a high reading needs both settledness and alertness high together.
+    val meditationProxy = clamp01(sqrt(settledness * alertness) * quality.qualityConfidence)
 
     return ClassifierOutput(
       rawStateLabel = rawStateLabel,

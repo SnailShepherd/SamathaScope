@@ -1,0 +1,18 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+  <!-- Concentric rings settling on a centre point, inside the 66dp adaptive-icon safe zone. -->
+  <path
+      android:fillColor="#FFFFFFFF"
+      android:fillType="evenOdd"
+      android:pathData="M54,25A29,29 0,1 1,25 54,29,29 0,0 1,54 25ZM54,29A25,25 0,1 0,79 54,25,25 0,0 0,54 29Z" />
+  <path
+      android:fillColor="#B3FFFFFF"
+      android:fillType="evenOdd"
+      android:pathData="M54,36A18,18 0,1 1,36 54,18,18 0,0 1,54 36ZM54,40A14,14 0,1 0,68 54,14,14 0,0 0,54 40Z" />
+  <path
+      android:fillColor="#FFFFFFFF"
+      android:pathData="M54,47A7,7 0,1 1,47 54,7,7 0,0 1,54 47Z" />
+</vector>

@@ -7,6 +7,16 @@ import kotlin.math.exp
 import kotlin.math.pow
 import kotlin.random.Random
 
+/**
+ * Noise level for a feedback value in [0, 1]. By default better feedback is quieter: feedback 1 gives
+ * [gMinDb] and 0 gives [gMaxDb]; [invertReward] flips that. [gamma] shapes the curve in between.
+ */
+internal fun feedbackBaseDb(feedback: Float, invertReward: Boolean, gamma: Float, gMinDb: Int, gMaxDb: Int): Float {
+  val signal = feedback.coerceIn(0f, 1f)
+  val mapped = if (invertReward) signal else 1f - signal
+  return gMinDb + mapped.pow(gamma) * (gMaxDb - gMinDb)
+}
+
 class NoiseAudioEngine(
   private val sampleRate: Int = 48_000,
   private val frameSize: Int = 480,
@@ -26,6 +36,10 @@ class NoiseAudioEngine(
 
   private var track: AudioTrack? = null
   private var thread: Thread? = null
+  // Set from the caller's thread; everything below the volatile fields is touched only by the audio
+  // thread once it runs.
+  @Volatile private var fadeInRequested = false
+  @Volatile private var stopRequested = false
   private val leftNoise = NoiseState()
   private val rightNoise = NoiseState()
 
@@ -46,6 +60,7 @@ class NoiseAudioEngine(
   private var fadeIn: Float = 0f
   private var fading = false
   private var masterAudibility: Float = 0f
+  private var fadeOut: Float = 1f
 
   private val attackMs = 300f
   private val releaseMs = 1500f
@@ -53,9 +68,11 @@ class NoiseAudioEngine(
   fun start() {
     if (running) return
     running = true
+    stopRequested = false
     masterAudibility = 0f
     fadeIn = 0f
     fading = false
+    fadeOut = 1f
 
     val minBuffer = AudioTrack.getMinBufferSize(
       sampleRate,
@@ -83,24 +100,33 @@ class NoiseAudioEngine(
 
     track?.play()
     track?.setVolume(1f)
-    thread = Thread { audioLoop() }.apply {
+    val ownTrack = track ?: return
+    thread = Thread {
+      try {
+        audioLoop(ownTrack)
+      } finally {
+        // The audio thread owns the track's shutdown, so stop() never blocks the caller.
+        try { ownTrack.stop() } catch (_: Throwable) {}
+        try { ownTrack.release() } catch (_: Throwable) {}
+      }
+    }.apply {
       isDaemon = true
       start()
     }
   }
 
+  /**
+   * Fades the noise out over [FADE_OUT_SECONDS] and releases the audio track, without blocking.
+   * The engine cannot be restarted; create a new one.
+   */
   fun stop() {
-    running = false
-    try { thread?.join(300) } catch (_: Throwable) {}
+    stopRequested = true
     thread = null
-    try { track?.stop() } catch (_: Throwable) {}
-    try { track?.release() } catch (_: Throwable) {}
     track = null
   }
 
   fun beginFadeIn() {
-    fading = true
-    fadeIn = 0f
+    fadeInRequested = true
   }
 
   fun setMuted(value: Boolean) {
@@ -123,16 +149,24 @@ class NoiseAudioEngine(
     this.gMaxDb = gMaxDb
   }
 
-  private fun audioLoop() {
-    val track = track ?: return
+  private fun audioLoop(track: AudioTrack) {
     val buffer = ShortArray(frameSize * 2)
     val dt = frameSize.toFloat() / sampleRate.toFloat()
 
     while (running) {
-      val signal = targetFeedback
-      val mapped = if (!invertReward) (1f - signal).coerceIn(0f, 1f) else signal
-      val shaped = mapped.pow(gamma)
-      val baseDb = gMinDb + shaped * (gMaxDb - gMinDb)
+      if (fadeInRequested) {
+        fadeInRequested = false
+        fading = true
+        fadeIn = 0f
+      }
+      if (stopRequested) {
+        fadeOut -= dt / FADE_OUT_SECONDS
+        if (fadeOut <= 0f) {
+          running = false
+          break
+        }
+      }
+      val baseDb = feedbackBaseDb(targetFeedback, invertReward, gamma, gMinDb, gMaxDb)
       debugBaseDb = baseDb
 
       val targetAmp = dbToAmp(baseDb)
@@ -152,7 +186,7 @@ class NoiseAudioEngine(
       val masterTau = if (masterTarget < masterAudibility) 0.45f else 0.12f
       val masterAlpha = 1f - exp(-dt / masterTau)
       masterAudibility += masterAlpha * (masterTarget - masterAudibility)
-      val master = masterAudibility * if (fading) fadeIn else 1f
+      val master = masterAudibility * (if (fading) fadeIn else 1f) * fadeOut
 
       var cursor = 0
       repeat(frameSize) {
@@ -164,6 +198,10 @@ class NoiseAudioEngine(
 
       track.write(buffer, 0, buffer.size, AudioTrack.WRITE_BLOCKING)
     }
+  }
+
+  private companion object {
+    const val FADE_OUT_SECONDS = 0.6f
   }
 
   private fun dbToAmp(db: Float): Float {
